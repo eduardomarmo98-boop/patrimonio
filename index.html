@@ -415,36 +415,55 @@ const SB = (typeof supabase !== 'undefined' && SUPABASE_URL && SUPABASE_KEY)
 /* ------------------------------------------------------------ */
 const Storage = {
   KEY: 'bm_patrimonio_prod',
+  USER_KEY: 'bm_patrimonio_currentUser',  // sessão local (NUNCA sincronizada)
   _saving: false,
   _pending: null,
 
+  // Remove currentUser antes de subir/baixar do Supabase
+  _stripSession(d) { if (!d) return d; const { currentUser, ...rest } = d; return rest; },
+
+  // Lê a sessão local (qual usuário está logado neste navegador)
+  loadSession() {
+    const raw = localStorage.getItem(this.USER_KEY);
+    return raw ? parseInt(raw) || null : null;
+  },
+  saveSession(userId) {
+    if (userId == null) localStorage.removeItem(this.USER_KEY);
+    else localStorage.setItem(this.USER_KEY, String(userId));
+  },
+
   async load() {
+    const localSession = this.loadSession();
     if (SB) {
       try {
         const { data, error } = await SB.from('app_state').select('data').eq('id', 1).maybeSingle();
         if (error) throw error;
         if (data && data.data && Object.keys(data.data).length > 0) {
-          localStorage.setItem(this.KEY, JSON.stringify(data.data));
-          return data.data;
+          const merged = { ...data.data, currentUser: localSession };
+          localStorage.setItem(this.KEY, JSON.stringify(this._stripSession(merged)));
+          return merged;
         }
-        // Sem dados ainda — semeia e envia
+        // Sem dados ainda — semeia e envia (sem currentUser)
         const seeded = this.seed();
-        await SB.from('app_state').upsert({ id: 1, data: seeded, updated_at: new Date().toISOString() });
-        return seeded;
+        await SB.from('app_state').upsert({ id: 1, data: this._stripSession(seeded), updated_at: new Date().toISOString() });
+        return { ...seeded, currentUser: localSession };
       } catch (e) {
         console.warn('[Supabase] load falhou, usando cache local:', e.message);
       }
     }
     const raw = localStorage.getItem(this.KEY);
-    if (raw) { try { return JSON.parse(raw); } catch {} }
-    return this.seed();
+    if (raw) { try { return { ...JSON.parse(raw), currentUser: localSession }; } catch {} }
+    return { ...this.seed(), currentUser: localSession };
   },
 
   save(data) {
-    localStorage.setItem(this.KEY, JSON.stringify(data));
+    // Persiste sessão local separadamente
+    this.saveSession(data && data.currentUser);
+    const shared = this._stripSession(data);
+    localStorage.setItem(this.KEY, JSON.stringify(shared));
     if (!SB) return;
     // Coalesce múltiplos saves seguidos numa única upsert
-    this._pending = data;
+    this._pending = shared;
     if (this._saving) return;
     this._saving = true;
     queueMicrotask(async () => {
@@ -2351,35 +2370,4 @@ function openCadUser() {
       email: node.querySelector('#u-email').value.trim(),
       setor: node.querySelector('#u-setor').value.trim(),
       senha: node.querySelector('#u-senha').value,
-      perfil: node.querySelector('#u-perfil').value
-    });
-    save(); node.remove(); toast('Usuário adicionado', 'success'); openCadUser();
-  });
-}
-
-/* ============== INIT ============== */
-(async () => {
-  // Mostra loading enquanto carrega do Supabase
-  const appEl = document.getElementById('app');
-  if (appEl) appEl.innerHTML = '<div style="padding:60px 20px;text-align:center;color:#1B2A5E;font-family:sans-serif;"><div style="font-size:32px;margin-bottom:16px;">⏳</div><div style="font-weight:700;">Carregando...</div></div>';
-
-  try {
-    DB = await Storage.load();
-  } catch (e) {
-    console.error('Erro ao carregar dados:', e);
-  }
-  render();
-
-  // Realtime: quando outro usuário alterar, recarrega o estado e re-renderiza
-  Storage.subscribe((newData) => {
-    if (!newData) return;
-    const myUserId = DB && DB.currentUser;
-    DB = newData;
-    // Mantém a sessão local (currentUser não vem do Supabase)
-    if (myUserId) DB.currentUser = myUserId;
-    render();
-  });
-})();
-</script>
-</body>
-</html>
+      perfil: node.querySelector('#u-
