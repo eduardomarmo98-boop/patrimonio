@@ -1,0 +1,2385 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1B2A5E">
+<meta name="description" content="Controle de Patrimônio Brandão & Marmo Engenharia">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Patrimônio">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Brandão & Marmo — Controle de Patrimônio</title>
+<script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  :root {
+    --brand-orange: #EE7E22;
+    --brand-orange-dark: #C8631A;
+    --brand-orange-light: #fde6d2;
+    --brand-navy: #1B2A5E;
+    --brand-navy-dark: #0F1A40;
+    --brand-navy-light: #e3e7f3;
+    --success: #16a34a;
+    --warning: #ea580c;
+    --danger: #dc2626;
+    --bg: #f4f4f5;
+    --card: #ffffff;
+    --text: #1a1a1a;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+  }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overscroll-behavior-y: contain;
+  }
+  #app { max-width: 480px; margin: 0 auto; min-height: 100vh; padding-bottom: 84px; background: var(--bg); position: relative; }
+
+  /* ===== TOP BAR ===== */
+  header.topbar {
+    background: var(--brand-navy);
+    color: white;
+    padding: 12px 16px;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,.18);
+    border-bottom: 3px solid var(--brand-orange);
+  }
+  header.topbar .brand { display: flex; flex-direction: column; line-height: 1.1; }
+  header.topbar .brand .name { font-size: 15px; font-weight: 800; letter-spacing: 1px; }
+  header.topbar .brand .name .amp { color: var(--brand-orange); }
+  header.topbar .brand .tag { font-size: 10px; color: var(--brand-orange); font-weight: 600; letter-spacing: 0.5px; margin-top: 2px; }
+  header.topbar .right { display: flex; gap: 6px; align-items: center; }
+  header.topbar .icon-btn {
+    background: rgba(255,255,255,.1); border: 0; color: white; width: 36px; height: 36px;
+    border-radius: 8px; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  header.topbar .icon-btn:active { background: rgba(255,255,255,.22); }
+  header.topbar .icon-btn .badge-dot {
+    position: absolute; top: 4px; right: 4px;
+    background: var(--brand-orange); color: var(--brand-navy);
+    min-width: 16px; height: 16px; border-radius: 8px;
+    font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 4px;
+  }
+
+  /* botão de refresh com animação */
+  @keyframes bm-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  header.topbar .icon-btn.spinning svg,
+  header.topbar .icon-btn.spinning .ic { animation: bm-spin 0.6s linear; }
+
+  main.content { padding: 16px; }
+  .page-title { font-size: 18px; font-weight: 700; margin-bottom: 12px; color: var(--brand-navy); }
+  .page-subtitle { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+
+  .card {
+    background: var(--card);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .card h2 { font-size: 15px; margin-bottom: 10px; color: var(--brand-navy); font-weight: 700; }
+  .card .card-hint { font-size: 12px; color: var(--muted); margin-top: -4px; margin-bottom: 10px; }
+
+  /* ===== STATS ===== */
+  .stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px; }
+  .stat {
+    background: var(--card); border-radius: 12px; padding: 14px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05);
+    border-left: 4px solid var(--brand-orange);
+  }
+  .stat .label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat .value { font-size: 22px; font-weight: 800; color: var(--brand-navy); margin-top: 4px; }
+  .stat.alert { border-left-color: var(--brand-orange); }
+  .stat.alert .value { color: var(--warning); }
+
+  /* ===== BUTTONS ===== */
+  .btn {
+    background: var(--brand-orange); color: white; border: 0; padding: 12px 16px;
+    border-radius: 8px; font-size: 15px; font-weight: 700; cursor: pointer;
+    width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+    transition: background .15s;
+  }
+  .btn:active { background: var(--brand-orange-dark); }
+  .btn.secondary { background: white; color: var(--brand-navy); border: 1px solid var(--border); }
+  .btn.secondary:active { background: #f3f4f6; }
+  .btn.outline-red { background: white; color: var(--brand-orange); border: 1px solid var(--brand-orange); }
+  .btn.dark { background: var(--brand-navy); color: white; }
+  .btn.danger { background: var(--danger); }
+  .btn.warning { background: var(--warning); }
+  .btn.success { background: var(--success); }
+  .btn-row { display: flex; gap: 8px; }
+  .btn-row .btn { flex: 1; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ===== FORMS ===== */
+  .form-group { margin-bottom: 12px; }
+  .form-group label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+  .form-group input, .form-group select, .form-group textarea {
+    width: 100%; padding: 10px 12px; font-size: 15px;
+    border: 1px solid var(--border); border-radius: 8px; background: white;
+    font-family: inherit;
+  }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+    outline: 2px solid var(--brand-orange); outline-offset: -1px; border-color: var(--brand-orange);
+  }
+  .form-group input:read-only, .form-group input:disabled,
+  .form-group textarea:read-only, .form-group textarea:disabled,
+  .form-group select:disabled {
+    background: #f3f4f6; color: #6b7280; cursor: not-allowed;
+  }
+  .form-help { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .lock-hint { background: #fef9c3; border: 1px solid #fde68a; color: #854d0e; padding: 8px 10px; border-radius: 8px; font-size: 12px; display: flex; gap: 6px; align-items: flex-start; margin-bottom: 12px; }
+
+  /* ===== ITEM LIST ===== */
+  .item-list { display: flex; flex-direction: column; gap: 8px; }
+  .item {
+    background: var(--card); border-radius: 10px; padding: 12px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05);
+    display: flex; align-items: center; gap: 12px; cursor: pointer;
+    border-left: 3px solid transparent;
+  }
+  .item:active { background: #f8fafc; }
+  .item.cat-ti { border-left-color: var(--brand-navy); }
+  .item.cat-obra { border-left-color: var(--brand-orange); }
+  .item.pending-accept { border-left-color: var(--warning); background: #fff7ed; }
+  .item .item-icon {
+    width: 42px; height: 42px; border-radius: 10px; background: var(--brand-orange-light);
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
+    flex-shrink: 0;
+  }
+  .item.cat-ti .item-icon { background: var(--brand-navy-light); }
+  .item.cat-obra .item-icon { background: var(--brand-orange-light); }
+  .item .item-info { flex: 1; min-width: 0; }
+  .item .item-info .title { font-weight: 700; font-size: 14px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .item-info .subtitle { font-size: 12px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .item-info .codigo { font-family: 'SF Mono', Consolas, monospace; font-size: 11px; color: var(--brand-orange); font-weight: 600; }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+  .badge.ativo { background: #dcfce7; color: #166534; }
+  .badge.aguardando_aceite { background: #fed7aa; color: #9a3412; }
+  .badge.manutencao { background: #fef3c7; color: #854d0e; }
+  .badge.emprestado { background: #ddd6fe; color: #5b21b6; }
+  .badge.baixado { background: #fee2e2; color: #991b1b; }
+  .badge.extraviado { background: #fecaca; color: #7f1d1d; }
+  .badge.aguardando_aprovacao_cadastro { background: #e0e7ff; color: #3730a3; }
+  .badge.aguardando_aprovacao_baixa    { background: #fde68a; color: #92400e; }
+  .badge.aguardando_aprovacao_extravio { background: #fde68a; color: #92400e; }
+  .badge.cat-ti { background: var(--brand-navy-light); color: var(--brand-navy); }
+  .badge.cat-obra { background: var(--brand-orange-light); color: var(--brand-orange-dark); }
+
+  /* ===== BOTTOM NAV ===== */
+  nav.bottom-nav {
+    position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 100%; max-width: 480px; background: white;
+    border-top: 1px solid var(--border);
+    display: grid;
+    padding-bottom: env(safe-area-inset-bottom);
+    z-index: 100;
+    box-shadow: 0 -2px 8px rgba(0,0,0,.04);
+  }
+  nav.bottom-nav button {
+    background: none; border: 0; padding: 10px 4px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    color: var(--muted); font-size: 10px; font-weight: 600;
+    position: relative;
+  }
+  nav.bottom-nav button.active { color: var(--brand-orange); }
+  nav.bottom-nav button .nav-icon { font-size: 20px; }
+  nav.bottom-nav button .nav-pill {
+    position: absolute; top: 4px; right: calc(50% - 22px);
+    background: var(--brand-orange); color: var(--brand-navy);
+    font-size: 9px; font-weight: 800;
+    border-radius: 8px; padding: 1px 5px;
+    min-width: 16px; text-align: center;
+  }
+
+  /* ===== SCANNER ===== */
+  .scanner-container {
+    background: black; border-radius: 12px; overflow: hidden;
+    aspect-ratio: 4/3; position: relative;
+  }
+  #scanner-video { width: 100%; height: 100%; object-fit: cover; }
+  .scanner-overlay {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none; display: flex; align-items: center; justify-content: center;
+  }
+  .scanner-overlay::before {
+    content: ''; width: 70%; height: 30%; border: 3px solid var(--brand-orange); border-radius: 8px;
+    box-shadow: 0 0 0 9999px rgba(0,0,0,.4);
+  }
+  .scanner-status {
+    position: absolute; bottom: 10px; left: 10px; right: 10px;
+    background: rgba(0,0,0,.75); color: white; padding: 8px 12px;
+    border-radius: 8px; font-size: 13px; text-align: center;
+  }
+
+  /* ===== MODAL ===== */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 200;
+    display: flex; align-items: flex-end; justify-content: center;
+  }
+  .modal {
+    background: white; width: 100%; max-width: 480px; max-height: 92vh;
+    border-radius: 16px 16px 0 0; padding: 20px; overflow-y: auto;
+  }
+  .modal h2 { margin-bottom: 14px; color: var(--brand-navy); }
+  .modal .close-btn {
+    position: absolute; top: 12px; right: 16px; background: none; border: 0;
+    font-size: 24px; color: var(--muted); cursor: pointer;
+  }
+
+  .empty-state { text-align: center; color: var(--muted); padding: 40px 20px; }
+  .empty-state .emoji { font-size: 48px; margin-bottom: 8px; }
+  .empty-state p { font-size: 14px; }
+
+  .filter-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .filter-row select, .filter-row input { flex: 1; padding: 10px 12px; font-size: 14px; border: 1px solid var(--border); border-radius: 8px; background: white; }
+
+  .detail-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); gap: 10px; }
+  .detail-row:last-child { border-bottom: 0; }
+  .detail-row .label { color: var(--muted); font-size: 13px; flex-shrink: 0; }
+  .detail-row .value { font-weight: 600; font-size: 14px; text-align: right; word-break: break-word; }
+
+  .timeline { border-left: 2px solid var(--border); padding-left: 16px; margin-left: 8px; margin-top: 8px; }
+  .timeline-item { padding-bottom: 14px; position: relative; }
+  .timeline-item::before {
+    content: ''; position: absolute; left: -22px; top: 4px;
+    width: 10px; height: 10px; border-radius: 50%; background: var(--brand-orange);
+  }
+  .timeline-item.acceptance::before { background: var(--success); }
+  .timeline-item .when { font-size: 11px; color: var(--muted); }
+  .timeline-item .what { font-size: 14px; font-weight: 600; margin: 2px 0; color: var(--brand-navy); }
+  .timeline-item .who { font-size: 12px; color: var(--muted); }
+  .timeline-item .meta { font-size: 12px; color: var(--text); margin-top: 2px; }
+
+  .toast {
+    position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%);
+    background: var(--brand-navy); color: white; padding: 10px 16px;
+    border-radius: 8px; z-index: 300; font-size: 14px; font-weight: 500;
+    animation: toastIn .25s ease;
+    max-width: 90%; text-align: center;
+  }
+  .toast.success { background: var(--success); }
+  .toast.error { background: var(--danger); }
+  @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 20px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+  /* ===== QUICK ACTIONS ===== */
+  .quick-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .quick-action {
+    background: white; border: 0; border-radius: 12px; padding: 16px 10px;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05); cursor: pointer; font-size: 12px; font-weight: 600;
+    color: var(--brand-navy); text-align: center;
+  }
+  .quick-action .qa-icon { font-size: 26px; }
+  .quick-action:active { background: #f8fafc; }
+  .quick-action.primary { background: var(--brand-orange); color: white; }
+  .quick-action.primary:active { background: var(--brand-orange-dark); }
+  .quick-action.dark { background: var(--brand-navy); color: white; }
+
+  .seg-control { display: flex; background: var(--border); border-radius: 8px; padding: 3px; margin-bottom: 12px; }
+  .seg-control button {
+    flex: 1; background: none; border: 0; padding: 8px; font-size: 12px; font-weight: 600;
+    border-radius: 6px; cursor: pointer; color: var(--muted);
+  }
+  .seg-control button.active { background: white; color: var(--brand-orange); box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+
+  /* ===== LOGIN ===== */
+  .login-screen {
+    min-height: 100vh; display: flex; flex-direction: column; justify-content: center; padding: 24px;
+    background:
+      radial-gradient(circle at 18% 12%, rgba(238,126,34,0.20), transparent 42%),
+      radial-gradient(circle at 88% 92%, rgba(238,126,34,0.10), transparent 45%),
+      linear-gradient(160deg, #0F1A40 0%, #1B2A5E 55%, #14224d 100%);
+    position: relative;
+    overflow: hidden;
+  }
+  /* trama sutil que remete a etiquetas/codigo de barras */
+  .login-screen::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background-image: repeating-linear-gradient(
+      90deg,
+      rgba(255,255,255,0.05) 0 2px,
+      transparent 2px 7px,
+      rgba(255,255,255,0.025) 7px 9px,
+      transparent 9px 16px
+    );
+    -webkit-mask-image: linear-gradient(180deg, transparent 0%, black 30%, black 70%, transparent 100%);
+            mask-image: linear-gradient(180deg, transparent 0%, black 30%, black 70%, transparent 100%);
+    opacity: 0.55;
+  }
+  .login-screen > * { position: relative; z-index: 1; }
+
+  .login-screen .brand-icon {
+    width: 76px; height: 76px; margin: 0 auto 14px;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(145deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02));
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 20px;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.12);
+  }
+  .login-screen .brand-icon svg { width: 42px; height: 42px; display: block; }
+
+  .login-screen .logo { text-align: center; color: white; margin-bottom: 18px; }
+  .login-screen .logo .brand-mark {
+    font-size: 24px; font-weight: 800; letter-spacing: 2px;
+    display: inline-block; margin-bottom: 6px;
+  }
+  .login-screen .logo .brand-mark .amp { color: var(--brand-orange); }
+  .login-screen .logo .tagline {
+    font-size: 11px; opacity: 0.7; letter-spacing: 2px; font-weight: 600;
+  }
+  .login-screen .pill-wrap { text-align: center; margin-bottom: 24px; }
+  .login-screen .system-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.92);
+    border: 1px solid rgba(238,126,34,0.45);
+    font-size: 10px; font-weight: 700; letter-spacing: 2.5px;
+    padding: 6px 14px; border-radius: 20px;
+  }
+  .login-screen .system-pill .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--brand-orange);
+    box-shadow: 0 0 8px rgba(238,126,34,0.85);
+  }
+
+  .login-card {
+    background: white; border-radius: 16px; padding: 26px 22px;
+    box-shadow: 0 20px 50px rgba(0,0,0,.35), 0 2px 6px rgba(0,0,0,.15);
+    border-top: 3px solid var(--brand-orange);
+  }
+  .login-card h2 { margin-bottom: 4px; color: var(--brand-navy); font-size: 20px; }
+  .login-card .subtitle { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
+
+  .login-screen .footer-mark {
+    text-align: center; margin-top: 20px;
+    color: rgba(255,255,255,0.45); font-size: 10px; letter-spacing: 1.5px;
+  }
+
+  hr.separator { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
+
+  .pill { background: var(--brand-orange-light); color: var(--brand-orange-dark); padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; display: inline-block; }
+  .pill.dark { background: var(--brand-navy); color: white; }
+
+  .role-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 700; }
+  .role-chip.diretoria { background: var(--brand-navy); color: var(--brand-orange); }
+  .role-chip.admin_ti { background: var(--brand-navy); color: white; }
+  .role-chip.admin_obras { background: var(--brand-orange); color: white; }
+  .role-chip.operador { background: var(--border); color: var(--brand-navy); }
+
+  .alert-bar { background: #fff7ed; border: 1px solid #fdba74; color: #9a3412; padding: 12px; border-radius: 10px; margin-bottom: 12px; display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+  .alert-bar .ab-icon { font-size: 22px; }
+  .alert-bar .ab-body { flex: 1; }
+  .alert-bar .ab-title { font-weight: 700; font-size: 14px; }
+  .alert-bar .ab-text { font-size: 12px; margin-top: 2px; }
+  .alert-bar .ab-cta { font-size: 11px; font-weight: 700; color: var(--brand-orange); margin-top: 4px; }
+
+  .accept-card { background: #fff7ed; border: 2px solid var(--warning); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+  .accept-card .ac-title { font-weight: 700; color: #9a3412; font-size: 14px; }
+  .accept-card .ac-meta { font-size: 12px; color: #9a3412; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ============================================================ */
+/* BRANDÃO & MARMO ENGENHARIA — Controle de Patrimônio          */
+/* Versão de produção (Supabase realtime + cache local)         */
+/* ============================================================ */
+
+/* ----- Configuração Supabase -------------------------------- */
+const SUPABASE_URL = 'https://ehowzelpklxuyuccxncu.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_yPyOUxBxBSg4YBbOxqCc1w_pXDDqlG1';
+
+const SB = (typeof supabase !== 'undefined' && SUPABASE_URL && SUPABASE_KEY)
+  ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { realtime: { params: { eventsPerSecond: 5 } } })
+  : null;
+
+/* ------------------------------------------------------------ */
+const Storage = {
+  KEY: 'bm_patrimonio_prod',
+  _saving: false,
+  _pending: null,
+
+  async load() {
+    if (SB) {
+      try {
+        const { data, error } = await SB.from('app_state').select('data').eq('id', 1).maybeSingle();
+        if (error) throw error;
+        if (data && data.data && Object.keys(data.data).length > 0) {
+          localStorage.setItem(this.KEY, JSON.stringify(data.data));
+          return data.data;
+        }
+        // Sem dados ainda — semeia e envia
+        const seeded = this.seed();
+        await SB.from('app_state').upsert({ id: 1, data: seeded, updated_at: new Date().toISOString() });
+        return seeded;
+      } catch (e) {
+        console.warn('[Supabase] load falhou, usando cache local:', e.message);
+      }
+    }
+    const raw = localStorage.getItem(this.KEY);
+    if (raw) { try { return JSON.parse(raw); } catch {} }
+    return this.seed();
+  },
+
+  save(data) {
+    localStorage.setItem(this.KEY, JSON.stringify(data));
+    if (!SB) return;
+    // Coalesce múltiplos saves seguidos numa única upsert
+    this._pending = data;
+    if (this._saving) return;
+    this._saving = true;
+    queueMicrotask(async () => {
+      while (this._pending) {
+        const payload = this._pending; this._pending = null;
+        const { error } = await SB.from('app_state')
+          .upsert({ id: 1, data: payload, updated_at: new Date().toISOString() });
+        if (error) console.error('[Supabase] save erro:', error.message);
+      }
+      this._saving = false;
+    });
+  },
+
+  subscribe(onChange) {
+    if (!SB) return null;
+    return SB.channel('app_state_realtime')
+      .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'app_state' },
+          (payload) => { if (payload.new && payload.new.data) onChange(payload.new.data); })
+      .subscribe();
+  },
+
+  seed() {
+    return {
+      currentUser: null,
+      usuarios: [
+        { id: 1, nome: 'Diretoria',           email: 'diretoria@brandaomarmo.com', senha: 'TrocarSenha@123', perfil: 'diretoria',  setor: 'Diretoria' },
+        { id: 2, nome: 'Administrador TI',    email: 'ti@brandaomarmo.com',        senha: 'TrocarSenha@123', perfil: 'admin_ti',   setor: 'TI' },
+        { id: 3, nome: 'Administrador Obras', email: 'obras@brandaomarmo.com',     senha: 'TrocarSenha@123', perfil: 'admin_obras',setor: 'Obras' }
+      ],
+      categorias: [
+        { id: 1, nome: 'Obra', icone: '🦺' },
+        { id: 2, nome: 'TI - Equipamentos', icone: '💻' },
+        { id: 3, nome: 'TI - Softwares',    icone: '🔑' }
+      ],
+      localizacoes: [
+        { id: 1, nome: 'Sede Administrativa', tipo: 'unidade', parent: null }
+      ],
+      patrimonios: [],
+      movimentacoes: [],
+      subcategorias: [
+        { id: 1,  nome: 'Computadores/Notebooks', categoriaId: 2 },
+        { id: 2,  nome: 'Monitores',              categoriaId: 2 },
+        { id: 3,  nome: 'Impressoras',            categoriaId: 2 },
+        { id: 4,  nome: 'Redes/Telecom',          categoriaId: 2 },
+        { id: 5,  nome: 'Periféricos',            categoriaId: 2 },
+        { id: 6,  nome: 'Ferramentas Manuais',    categoriaId: 1 },
+        { id: 7,  nome: 'Máquinas/Equipamentos',  categoriaId: 1 },
+        { id: 8,  nome: 'EPIs',                   categoriaId: 1 },
+        { id: 9,  nome: 'Veículos',               categoriaId: 1 },
+        { id: 10, nome: 'Suite Office',           categoriaId: 3 },
+        { id: 11, nome: 'Sistema de Gestão (ERP)',categoriaId: 3 },
+        { id: 12, nome: 'CAD / Projetos',         categoriaId: 3 },
+        { id: 13, nome: 'Segurança / Antivírus',  categoriaId: 3 },
+        { id: 14, nome: 'Sistema Operacional',    categoriaId: 3 },
+        { id: 15, nome: 'Outros',                 categoriaId: 3 }
+      ],
+      softwareTipos: [],
+      inventarios: [],
+      _nextId: { patrimonios: 1, movimentacoes: 1, localizacoes: 2, usuarios: 4, inventarios: 1, subcategorias: 16 }
+    };
+  }
+};
+
+/* DB e save() — DB é hidratado pelo init() async no fim do script */
+let DB = { usuarios: [], categorias: [], subcategorias: [], localizacoes: [], patrimonios: [], movimentacoes: [], inventarios: [], softwareTipos: [], _nextId: { patrimonios:1, movimentacoes:1, localizacoes:1, usuarios:1, inventarios:1, subcategorias:1 } };
+const save = () => Storage.save(DB);
+const nextId = (col) => { DB._nextId[col] = (DB._nextId[col] || 1); const id = DB._nextId[col]++; save(); return id; };
+
+const $ = (sel, root=document) => root.querySelector(sel);
+const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtMoney = v => 'R$ ' + Number(v||0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDate = d => d ? new Date(d).toLocaleDateString('pt-BR') : '—';
+const fmtDateTime = d => d ? new Date(d).toLocaleString('pt-BR') : '—';
+
+function toast(msg, kind='') {
+  const t = document.createElement('div');
+  t.className = 'toast' + (kind ? ' ' + kind : '');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2200);
+}
+
+/* ============== AUTH & PERMISSIONS ============== */
+
+const Perms = {
+  isAdmin(u) { return u && (u.perfil === 'diretoria' || u.perfil === 'admin_ti' || u.perfil === 'admin_obras'); },
+  isDiretoria(u) { return u && u.perfil === 'diretoria'; },
+  isOperador(u) { return u && u.perfil === 'operador'; },
+  canManageCategoria(u, categoriaId) {
+    if (!u) return false;
+    if (u.perfil === 'diretoria') return true;
+    if (u.perfil === 'admin_ti'   && (categoriaId === 2 || categoriaId === 3)) return true;
+    if (u.perfil === 'admin_obras'&& categoriaId === 1) return true;
+    return false;
+  },
+  canCreate(u) { return !!u; },
+  canDelete(u) { return Perms.isDiretoria(u); },
+  canApproveCadastro(u, categoriaId) {
+    if (!u) return false;
+    if (u.perfil === 'diretoria') return true;
+    if (u.perfil === 'admin_ti'   && (categoriaId === 2 || categoriaId === 3)) return true;
+    if (u.perfil === 'admin_obras'&& categoriaId === 1) return true;
+    return false;
+  },
+  canRequestBaixa(u, categoriaId) { return Perms.canManageCategoria(u, categoriaId); },
+  canApproveBaixa(u) { return Perms.isDiretoria(u); },
+  allowedCategorias(u) {
+    if (!u) return [];
+    if (u.perfil === 'diretoria')  return DB.categorias;
+    if (u.perfil === 'admin_ti')   return DB.categorias.filter(c => c.id === 2 || c.id === 3);
+    if (u.perfil === 'admin_obras')return DB.categorias.filter(c => c.id === 1);
+    if (u.perfil === 'operador')   return DB.categorias;
+    return [];
+  },
+  perfilLabel(perfil) {
+    return ({
+      diretoria:    'Diretoria',
+      admin_ti:     'Adm. TI',
+      admin_obras:  'Adm. Obras',
+      operador:     'Operador'
+    })[perfil] || perfil;
+  }
+};
+
+/* ============== LOOKUPS ============== */
+
+const Lookup = {
+  user(id) { return DB.usuarios.find(u => u.id === id); },
+  cat(id)  { return DB.categorias.find(c => c.id === id); },
+  loc(id)  { return DB.localizacoes.find(l => l.id === id); },
+  movs(patrimonioId) { return DB.movimentacoes.filter(m => m.patrimonioId === patrimonioId).sort((a,b) => new Date(a.data) - new Date(b.data)); },
+  pendingForUser(userId) {
+    return DB.patrimonios.filter(p => p.status === 'aguardando_aceite' && p.responsavelAtualId === userId);
+  },
+  pendingCadastrosForApprover(user) {
+    return DB.patrimonios.filter(p =>
+      p.status === 'aguardando_aprovacao_cadastro' &&
+      Perms.canApproveCadastro(user, p.categoriaId)
+    );
+  },
+  pendingBaixasForDiretoria(user) {
+    if (!Perms.isDiretoria(user)) return [];
+    return DB.patrimonios.filter(p =>
+      p.status === 'aguardando_aprovacao_baixa' ||
+      p.status === 'aguardando_aprovacao_extravio'
+    );
+  },
+  pendingCount(userId) {
+    const u = Lookup.user(userId);
+    if (!u) return 0;
+    return Lookup.pendingForUser(userId).length
+         + Lookup.pendingCadastrosForApprover(u).length
+         + Lookup.pendingBaixasForDiretoria(u).length;
+  },
+  canSee(user, p) {
+    if (!user || !p) return false;
+    if (user.perfil === 'diretoria') return true;
+    if (user.perfil === 'admin_ti')    return p.categoriaId === 2 || p.categoriaId === 3;
+    if (user.perfil === 'admin_obras') return p.categoriaId === 1;
+    return p.responsavelAtualId === user.id || p.criadoPor === user.id;
+  },
+  visibleItems(user) {
+    return DB.patrimonios.filter(p => Lookup.canSee(user, p));
+  },
+  // Localizações que o usuário pode ver — operador só vê locais onde tem item
+  visibleLocations(user) {
+    if (!user) return [];
+    if (Perms.isAdmin(user)) {
+      // admin_ti/obras vê todos os locais (para mover entre obras)
+      return DB.localizacoes;
+    }
+    const myLocs = new Set(Lookup.visibleItems(user).map(p => p.localizacaoAtualId));
+    return DB.localizacoes.filter(l => myLocs.has(l.id));
+  },
+  hasItemsUnderCustody(userId) {
+    return DB.patrimonios.some(p => p.responsavelAtualId === userId);
+  }
+};
+
+/* ============== ROUTER STATE ============== */
+
+let State = {
+  tab: 'home',
+  filter: { q: '', status: '', categoria: '', local: '', responsavel: '' }
+};
+
+/* ============== RENDER ============== */
+
+function render() {
+  const app = $('#app');
+  if (!DB.currentUser) {
+    app.innerHTML = renderLogin();
+    bindLogin();
+    return;
+  }
+  app.innerHTML = renderTopbar() + `<main class="content">${renderTab()}</main>` + renderBottomNav();
+  bindTopbar();
+  bindBottomNav();
+  bindTab();
+}
+
+/* --- LOGIN --- */
+
+function renderLogin() {
+  return `
+    <div class="login-screen">
+      <div class="brand-icon" aria-hidden="true">
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" fill="none">
+          <path d="M32 4 L56 12 V30 C56 44 46 54 32 60 C18 54 8 44 8 30 V12 Z"
+                fill="rgba(238,126,34,0.12)" stroke="#EE7E22" stroke-width="2" stroke-linejoin="round"/>
+          <rect x="20" y="22" width="24" height="20" rx="2"
+                fill="#EE7E22" stroke="#fff" stroke-width="1.5"/>
+          <line x1="20" y1="29" x2="44" y2="29" stroke="#fff" stroke-width="1.5"/>
+          <line x1="32" y1="22" x2="32" y2="29" stroke="#fff" stroke-width="1.5"/>
+          <g stroke="#fff" stroke-width="1.2">
+            <line x1="23" y1="33" x2="23" y2="39"/>
+            <line x1="26" y1="33" x2="26" y2="39"/>
+            <line x1="28" y1="33" x2="28" y2="39"/>
+            <line x1="31" y1="33" x2="31" y2="39"/>
+            <line x1="34" y1="33" x2="34" y2="39"/>
+            <line x1="37" y1="33" x2="37" y2="39"/>
+            <line x1="40" y1="33" x2="40" y2="39"/>
+          </g>
+          <circle cx="46" cy="46" r="7" fill="#1B2A5E" stroke="#fff" stroke-width="1.5"/>
+          <path d="M43 46 L45.5 48.5 L49 44.5" stroke="#EE7E22" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </div>
+      <div class="logo">
+        <div class="brand-mark">BRANDÃO <span class="amp">&amp;</span> MARMO</div>
+        <div class="tagline">ENGENHARIA E CONSTRUÇÕES</div>
+      </div>
+      <div class="pill-wrap">
+        <div class="system-pill"><span class="dot"></span>CONTROLE DE PATRIMÔNIO</div>
+      </div>
+      <div class="login-card">
+        <h2>Entrar</h2>
+        <div class="subtitle">Acesse com suas credenciais corporativas</div>
+        <form id="login-form">
+          <div class="form-group">
+            <label>E-mail</label>
+            <input type="email" id="login-email" placeholder="seu@brandaomarmo.com" required>
+          </div>
+          <div class="form-group">
+            <label>Senha</label>
+            <input type="password" id="login-senha" required>
+          </div>
+          <button type="submit" class="btn">Entrar</button>
+        </form>
+      </div>
+      <div class="footer-mark">© BRANDÃO &amp; MARMO • SISTEMA INTERNO</div>
+    </div>
+  `;
+}
+
+function bindLogin() {
+  $('#login-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const email = $('#login-email').value.trim().toLowerCase();
+    const senha = $('#login-senha').value;
+    const u = DB.usuarios.find(u => u.email.toLowerCase() === email && u.senha === senha);
+    if (!u) return toast('E-mail ou senha incorretos', 'error');
+    DB.currentUser = u.id;
+    save();
+    toast('Bem-vindo, ' + u.nome.split(' ')[0], 'success');
+    render();
+  });
+}
+
+/* --- TOPBAR --- */
+
+function renderTopbar() {
+  const u = Lookup.user(DB.currentUser);
+  const pending = Lookup.pendingCount(u.id);
+  return `
+    <header class="topbar">
+      <div class="brand">
+        <div class="name">BRANDÃO <span class="amp">&amp;</span> MARMO</div>
+        <div class="tag">CONTROLE DE PATRIMÔNIO</div>
+      </div>
+      <div class="right">
+        <button class="icon-btn" id="btn-refresh" title="Atualizar"><span class="ic">⟳</span></button>
+        <button class="icon-btn" id="btn-pending" title="Aceites pendentes">
+          🔔
+          ${pending ? `<span class="badge-dot">${pending}</span>` : ''}
+        </button>
+        <button class="icon-btn" id="btn-logout" title="Sair" style="width:auto; padding:0 10px; font-size:13px; font-weight:700; gap:4px;">↩ Sair</button>
+      </div>
+    </header>
+  `;
+}
+function bindTopbar() {
+  $('#btn-refresh').addEventListener('click', () => {
+    const btn = $('#btn-refresh');
+    btn.classList.add('spinning');
+    /* recarrega DB do localStorage e re-renderiza */
+    DB = Storage.load();
+    setTimeout(() => { render(); toast('Atualizado', 'success'); }, 300);
+  });
+  $('#btn-logout').addEventListener('click', () => {
+    if (!confirm('Encerrar a sessão?')) return;
+    DB.currentUser = null; save(); render();
+  });
+  $('#btn-pending').addEventListener('click', () => {
+    State.tab = 'pending'; render();
+  });
+}
+
+/* --- BOTTOM NAV --- */
+
+function renderBottomNav() {
+  const u = Lookup.user(DB.currentUser);
+  const pending = Lookup.pendingCount(u.id);
+  const tabs = [
+    { id: 'home',     icon: '🏠', label: 'Início' },
+    { id: 'list',     icon: '📋', label: 'Bens' },
+    Perms.canCreate(u) ? { id: 'create', icon: '➕', label: 'Cadastrar' } : null,
+    { id: 'pending',  icon: '✅', label: 'Pendências', pill: pending },
+    { id: 'more',     icon: '⋯',  label: 'Mais' }
+  ].filter(Boolean);
+
+  return `
+    <nav class="bottom-nav" style="grid-template-columns: repeat(${tabs.length}, 1fr);">
+      ${tabs.map(t => `
+        <button data-tab="${t.id}" class="${State.tab === t.id ? 'active' : ''}">
+          <span class="nav-icon">${t.icon}</span>
+          <span>${t.label}</span>
+          ${t.pill ? `<span class="nav-pill">${t.pill}</span>` : ''}
+        </button>
+      `).join('')}
+    </nav>
+  `;
+}
+function bindBottomNav() {
+  $$('.bottom-nav button').forEach(b => b.addEventListener('click', () => {
+    State.tab = b.dataset.tab; render();
+  }));
+}
+
+/* --- TABS DISPATCH --- */
+
+function renderTab() {
+  switch (State.tab) {
+    case 'home':    return renderHome();
+    case 'list':    return renderList();
+    case 'create':  return renderCreate();
+    case 'pending': return renderPending();
+    case 'more':    return renderMore();
+    default:        return renderHome();
+  }
+}
+function bindTab() {
+  switch (State.tab) {
+    case 'home':    bindHome(); break;
+    case 'list':    bindList(); break;
+    case 'create':  bindCreate(); break;
+    case 'pending': bindPending(); break;
+    case 'more':    bindMore(); break;
+  }
+}
+
+/* ============== HOME ============== */
+
+function renderHome() {
+  const u = Lookup.user(DB.currentUser);
+  const visible = Lookup.visibleItems(u);
+  const total = visible.length;
+  const ativos = visible.filter(p => p.status === 'ativo').length;
+  const manut = visible.filter(p => p.status === 'manutencao').length;
+  const pending = Lookup.pendingForUser(u.id);
+  const podeCadastrar = Perms.canCreate(u);
+  const isOperador = u.perfil === 'operador';
+
+  const escopoCat =
+    u.perfil === 'admin_ti' ? '<div class="card-hint">Você gerencia apenas itens de <strong>TI</strong></div>' :
+    u.perfil === 'admin_obras' ? '<div class="card-hint">Você gerencia apenas itens de <strong>Obra</strong></div>' :
+    u.perfil === 'diretoria' ? '<div class="card-hint">Acesso total ao sistema</div>' :
+    '<div class="card-hint">Visualizando apenas os bens sob sua custódia</div>';
+
+  // Últimas movimentações visíveis ao usuário
+  const ultMovs = DB.movimentacoes
+    .filter(m => {
+      const p = DB.patrimonios.find(pp => pp.id === m.patrimonioId);
+      return p && Lookup.canSee(u, p);
+    })
+    .sort((a,b) => new Date(b.data) - new Date(a.data))
+    .slice(0, 50);
+
+  const totalLabel = isOperador ? 'Sob minha custódia' : 'Total de bens';
+
+  return `
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
+      <div style="flex:1">
+        <div style="font-size:13px; color:var(--muted);">Olá,</div>
+        <div style="font-size:18px; font-weight:800; color:var(--brand-navy);">${escapeHtml(u.nome)}</div>
+      </div>
+      <span class="role-chip ${u.perfil}">${Perms.perfilLabel(u.perfil)}</span>
+    </div>
+
+    ${pending.length ? `
+      <div class="alert-bar" data-action="goto-pending">
+        <div class="ab-icon">⚠️</div>
+        <div class="ab-body">
+          <div class="ab-title">${pending.length} ${pending.length === 1 ? 'item aguardando' : 'itens aguardando'} seu aceite</div>
+          <div class="ab-text">Confirme o recebimento para que a movimentação seja efetivada.</div>
+          <div class="ab-cta">Ver pendências →</div>
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="stat-grid">
+      <div class="stat"><div class="label">${totalLabel}</div><div class="value">${total}</div></div>
+      <div class="stat"><div class="label">Ativos</div><div class="value">${ativos}</div></div>
+      <div class="stat ${manut ? 'alert' : ''}"><div class="label">Em manutenção</div><div class="value">${manut}</div></div>
+      <div class="stat ${pending.length ? 'alert' : ''}"><div class="label">Aguard. aceite</div><div class="value">${pending.length}</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Ações rápidas</h2>
+      ${escopoCat}
+      <div class="quick-actions">
+        <button class="quick-action primary" data-action="scan">
+          <span class="qa-icon">📷</span>Escanear código
+        </button>
+        <button class="quick-action" data-action="search">
+          <span class="qa-icon">🔍</span>${isOperador ? 'Meus bens' : 'Buscar bem'}
+        </button>
+        ${podeCadastrar ? `
+          <button class="quick-action dark" data-action="create">
+            <span class="qa-icon">➕</span>Cadastrar bem
+          </button>
+        ` : ''}
+        ${!isOperador ? `
+          <button class="quick-action" data-action="inventory">
+            <span class="qa-icon">📦</span>Inventário
+          </button>
+        ` : ''}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Últimas movimentações <span class="pill">${ultMovs.length}</span></h2>
+      ${ultMovs.length ? `
+        <div class="timeline" style="margin-top:4px; max-height:340px; overflow-y:auto; padding-right:6px;">
+          ${ultMovs.map(m => {
+            const p = DB.patrimonios.find(pp => pp.id === m.patrimonioId);
+            const tipoLabel = ({
+              cadastro:'Cadastro inicial',
+              transferencia_local:'Transferência de local',
+              transferencia_resp:'Transferência de responsável',
+              transferencia_local_resp:'Transferência',
+              manutencao:'Enviado para manutenção',
+              retorno_manutencao:'Retorno de manutenção',
+              aceite_recebimento:'✓ Recebimento confirmado',
+              baixa:'Baixa',
+              extraviado:'Extraviado',
+              inventario:'Inventário'
+            })[m.tipo] || m.tipo;
+            const usr = Lookup.user(m.usuarioId);
+            return `
+              <div class="timeline-item ${m.tipo==='aceite_recebimento'?'acceptance':''}" data-action="open" data-id="${p ? p.id : ''}" style="cursor:pointer;">
+                <div class="when">${fmtDateTime(m.data)}</div>
+                <div class="what">${tipoLabel}</div>
+                <div class="meta">${escapeHtml(p ? p.descricao : '—')}</div>
+                <div class="who">por ${escapeHtml(usr ? usr.nome : '—')}</div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      ` : `<div class="empty-state" style="padding:20px;"><p>Sem movimentações recentes.</p></div>`}
+    </div>
+  `;
+}
+
+function bindHome() {
+  $$('.alert-bar[data-action="goto-pending"]').forEach(b => b.addEventListener('click', () => { State.tab = 'pending'; render(); }));
+  $$('[data-action="scan"]').forEach(b => b.addEventListener('click', () => openScanner()));
+  $$('[data-action="search"]').forEach(b => b.addEventListener('click', () => { State.tab = 'list'; render(); }));
+  $$('[data-action="create"]').forEach(b => b.addEventListener('click', () => { State.tab = 'create'; render(); }));
+  $$('[data-action="inventory"]').forEach(b => b.addEventListener('click', () => { State.tab = 'more'; render(); setTimeout(openInventoryStart, 50); }));
+  $$('.timeline-item[data-action="open"]').forEach(el => el.addEventListener('click', () => {
+    const id = parseInt(el.dataset.id); if (id) openDetail(id);
+  }));
+}
+
+/* ============== LIST ============== */
+
+function renderList() {
+  const u = Lookup.user(DB.currentUser);
+  const f = State.filter;
+  const isAdmin = Perms.isAdmin(u);
+  const isOperador = u.perfil === 'operador';
+  let items = Lookup.visibleItems(u);
+
+  if (f.q) {
+    const q = f.q.toLowerCase();
+    items = items.filter(p =>
+      p.descricao.toLowerCase().includes(q) ||
+      p.codigoBarras.toLowerCase().includes(q) ||
+      (p.tipoSoftware || '').toLowerCase().includes(q)
+    );
+  }
+  if (f.status) items = items.filter(p => p.status === f.status);
+  if (f.categoria) items = items.filter(p => String(p.categoriaId) === String(f.categoria));
+  if (f.local) items = items.filter(p => String(p.localizacaoAtualId) === String(f.local));
+  if (f.responsavel) items = items.filter(p => String(p.responsavelAtualId) === String(f.responsavel));
+
+  // Categorias disponíveis para o usuário (admin_ti só vê TI, etc.)
+  const catsVisiveis = u.perfil === 'admin_ti' ? DB.categorias.filter(c => c.id === 2 || c.id === 3)
+                     : u.perfil === 'admin_obras' ? DB.categorias.filter(c => c.id === 1)
+                     : DB.categorias;
+  const showCatFilter = catsVisiveis.length > 1;
+
+  // Locais e usuários para os filtros (apenas admins)
+  const locaisDisponiveis = Lookup.visibleLocations(u);
+  const usuariosDisponiveis = DB.usuarios;
+
+  const titulo = isOperador ? 'Meus bens' : 'Patrimônios';
+
+  return `
+    <div class="page-title">${titulo} <span class="pill">${items.length}</span></div>
+
+    <div class="filter-row">
+      <input type="text" id="f-q" placeholder="Buscar..." value="${escapeHtml(f.q)}">
+    </div>
+    <div class="filter-row">
+      ${showCatFilter ? `
+      <select id="f-cat">
+        <option value="">Todas categorias</option>
+        ${catsVisiveis.map(c => `<option value="${c.id}" ${String(f.categoria)===String(c.id)?'selected':''}>${c.icone} ${c.nome}</option>`).join('')}
+      </select>` : ''}
+      <select id="f-status">
+        <option value="">Todos status</option>
+        <option value="ativo"                            ${f.status==='ativo'?'selected':''}>Ativo</option>
+        <option value="aguardando_aceite"                ${f.status==='aguardando_aceite'?'selected':''}>Aguard. aceite</option>
+        <option value="aguardando_aprovacao_cadastro"    ${f.status==='aguardando_aprovacao_cadastro'?'selected':''}>Aguard. aprovação cadastro</option>
+        <option value="aguardando_aprovacao_baixa"       ${f.status==='aguardando_aprovacao_baixa'?'selected':''}>Aguard. aprovação baixa</option>
+        <option value="aguardando_aprovacao_extravio"    ${f.status==='aguardando_aprovacao_extravio'?'selected':''}>Aguard. aprovação extravio</option>
+        <option value="manutencao"                       ${f.status==='manutencao'?'selected':''}>Manutenção</option>
+        <option value="emprestado"         ${f.status==='emprestado'?'selected':''}>Emprestado</option>
+        <option value="baixado"            ${f.status==='baixado'?'selected':''}>Baixado</option>
+        <option value="extraviado"         ${f.status==='extraviado'?'selected':''}>Extraviado</option>
+      </select>
+    </div>
+    ${isAdmin ? `
+    <div class="filter-row">
+      <select id="f-local">
+        <option value="">Todas localizações</option>
+        ${locaisDisponiveis.map(l => `<option value="${l.id}" ${String(f.local)===String(l.id)?'selected':''}>${escapeHtml(l.nome)}</option>`).join('')}
+      </select>
+      <select id="f-resp">
+        <option value="">Todos responsáveis</option>
+        ${usuariosDisponiveis.map(x => `<option value="${x.id}" ${String(f.responsavel)===String(x.id)?'selected':''}>${escapeHtml(x.nome)}</option>`).join('')}
+      </select>
+    </div>` : ''}
+
+    ${items.length ? `
+      <div class="item-list">
+        ${items.map(p => renderItemCard(p)).join('')}
+      </div>
+    ` : `
+      <div class="empty-state">
+        <div class="emoji">📭</div>
+        <p>${isOperador ? 'Você não tem bens sob sua custódia.' : 'Nenhum patrimônio encontrado.'}</p>
+      </div>
+    `}
+  `;
+}
+
+function renderItemCard(p) {
+  const cat = Lookup.cat(p.categoriaId);
+  const loc = Lookup.loc(p.localizacaoAtualId);
+  const resp = Lookup.user(p.responsavelAtualId);
+  const catClass = cat ? (cat.id === 2 ? 'cat-ti' : 'cat-obra') : '';
+  return `
+    <div class="item ${catClass} ${p.status === 'aguardando_aceite' ? 'pending-accept' : ''}" data-id="${p.id}" data-action="open">
+      <div class="item-icon">${cat ? cat.icone : '📦'}</div>
+      <div class="item-info">
+        <div class="title">${escapeHtml(p.descricao)}</div>
+        <div class="subtitle">${loc ? escapeHtml(loc.nome) : '—'} · ${resp ? escapeHtml(resp.nome) : 'Sem responsável'}</div>
+        <div style="margin-top:4px;">
+          <span class="codigo">${escapeHtml(p.codigoBarras)}</span>
+          <span class="badge ${p.status}" style="margin-left:6px;">${statusLabel(p.status)}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function statusLabel(s) {
+  return ({
+    ativo:'Ativo',
+    aguardando_aceite:'Aguard. aceite',
+    aguardando_aprovacao_cadastro:'Aguard. aprovação cadastro',
+    aguardando_aprovacao_baixa:'Aguard. aprovação baixa',
+    aguardando_aprovacao_extravio:'Aguard. aprovação extravio',
+    manutencao:'Manutenção',
+    emprestado:'Emprestado',
+    baixado:'Baixado',
+    extraviado:'Extraviado'
+  })[s] || s;
+}
+
+function bindList() {
+  const q = $('#f-q'); if (q) q.addEventListener('input', e => { State.filter.q = e.target.value; render(); $('#f-q').focus(); });
+  const fc = $('#f-cat'); if (fc) fc.addEventListener('change', e => { State.filter.categoria = e.target.value; render(); });
+  const fs = $('#f-status'); if (fs) fs.addEventListener('change', e => { State.filter.status = e.target.value; render(); });
+  const fl = $('#f-local'); if (fl) fl.addEventListener('change', e => { State.filter.local = e.target.value; render(); });
+  const fr = $('#f-resp'); if (fr) fr.addEventListener('change', e => { State.filter.responsavel = e.target.value; render(); });
+  $$('[data-action="open"]').forEach(el => el.addEventListener('click', () => openDetail(parseInt(el.dataset.id))));
+}
+
+/* ============== DETAIL MODAL ============== */
+
+function openDetail(patrimonioId) {
+  const p = DB.patrimonios.find(x => x.id === patrimonioId);
+  if (!p) return toast('Item não encontrado', 'error');
+  const u = Lookup.user(DB.currentUser);
+  if (!Lookup.canSee(u, p)) return toast('Sem permissão para visualizar este item', 'error');
+  const cat = Lookup.cat(p.categoriaId);
+  const loc = Lookup.loc(p.localizacaoAtualId);
+  const resp = Lookup.user(p.responsavelAtualId);
+  const movs = Lookup.movs(p.id);
+
+  const podeManager = Perms.canManageCategoria(u, p.categoriaId);
+  const podeDeletar = Perms.canDelete(u);
+  const aguardandoMeuAceite = (p.status === 'aguardando_aceite' && p.responsavelAtualId === u.id);
+
+  const html = `
+    <div class="modal-backdrop" id="modal-detail">
+      <div class="modal" onclick="event.stopPropagation()">
+        <button class="close-btn" data-close>&times;</button>
+        <h2>${escapeHtml(p.descricao)}</h2>
+        <div style="margin-bottom:12px;">
+          <span class="codigo" style="font-family:monospace; color:var(--brand-orange); font-weight:700;">${escapeHtml(p.codigoBarras)}</span>
+          <span class="badge ${p.status}" style="margin-left:8px;">${statusLabel(p.status)}</span>
+          <span class="badge ${cat && cat.id===2?'cat-ti':'cat-obra'}" style="margin-left:4px;">${cat?cat.icone+' '+cat.nome:'—'}</span>
+        </div>
+
+        ${aguardandoMeuAceite ? `
+          <div class="accept-card">
+            <div class="ac-title">Item aguardando seu aceite</div>
+            <div class="ac-meta">Confirme o recebimento para finalizar a movimentação.</div>
+            <div style="margin-top:10px;"><button class="btn success" data-action="accept">✓ Confirmar recebimento</button></div>
+          </div>
+        ` : ''}
+
+        <div class="card" style="padding:12px;">
+          <div class="detail-row"><span class="label">Categoria</span><span class="value">${cat ? cat.icone+' '+cat.nome : '—'}</span></div>
+          <div class="detail-row"><span class="label">Nota fiscal</span><span class="value">${escapeHtml(p.notaFiscal || '—')}</span></div>
+          <div class="detail-row"><span class="label">Aquisição</span><span class="value">${fmtDate(p.dataAquisicao)}</span></div>
+          <div class="detail-row"><span class="label">Valor</span><span class="value">${fmtMoney(p.valorAquisicao)}</span></div>
+          <div class="detail-row"><span class="label">Localização</span><span class="value">${loc ? escapeHtml(loc.nome) : '—'}</span></div>
+          <div class="detail-row"><span class="label">Responsável</span><span class="value">${resp ? escapeHtml(resp.nome) : '—'}</span></div>
+          ${p.observacoes ? `<div class="detail-row"><span class="label">Obs.</span><span class="value">${escapeHtml(p.observacoes)}</span></div>` : ''}
+          <div class="detail-row"><span class="label">Cadastrado por</span><span class="value">${escapeHtml((Lookup.user(p.criadoPor) || {}).nome || '—')} em ${fmtDate(p.criadoEm)}</span></div>
+        </div>
+
+        ${(() => {
+          if (p.status === 'aguardando_aprovacao_cadastro' && Perms.canApproveCadastro(u, p.categoriaId)) {
+            return `
+              <div class="accept-card" style="border-color:#3730a3; background:#eef2ff;">
+                <div class="ac-title" style="color:#3730a3;">Cadastro aguardando sua aprovação</div>
+                <div class="ac-meta" style="color:#3730a3;">Solicitado por ${escapeHtml((Lookup.user(p.criadoPor)||{}).nome || '—')}.</div>
+                <div class="btn-row" style="margin-top:10px;">
+                  <button class="btn success" data-action="approve-cad">✓ Aprovar cadastro</button>
+                  <button class="btn danger"  data-action="reject-cad">✗ Rejeitar</button>
+                </div>
+              </div>`;
+          }
+          if ((p.status === 'aguardando_aprovacao_baixa' || p.status === 'aguardando_aprovacao_extravio') && Perms.canApproveBaixa(u)) {
+            const tipo = p.status === 'aguardando_aprovacao_baixa' ? 'baixa' : 'extravio';
+            return `
+              <div class="accept-card" style="border-color:#92400e;">
+                <div class="ac-title">${tipo === 'baixa' ? 'Baixa' : 'Extravio'} aguardando aprovação da Diretoria</div>
+                <div class="ac-meta">Solicitado por ${escapeHtml((Lookup.user(p.solicitadoPor)||{}).nome || '—')}${p.solicitacaoMotivo ? ' · ' + escapeHtml(p.solicitacaoMotivo) : ''}.</div>
+                <div class="btn-row" style="margin-top:10px;">
+                  <button class="btn danger"    data-action="approve-baixa">✓ Aprovar ${tipo}</button>
+                  <button class="btn secondary" data-action="reject-baixa">✗ Rejeitar</button>
+                </div>
+              </div>`;
+          }
+          if (p.status === 'aguardando_aprovacao_cadastro' && p.criadoPor === u.id) {
+            return `<div class="lock-hint" style="margin-top:10px;"><span>⏳</span><span>Aguardando aprovação do administrador da categoria.</span></div>`;
+          }
+          if (p.status === 'aguardando_aprovacao_baixa' || p.status === 'aguardando_aprovacao_extravio') {
+            const tipo = p.status === 'aguardando_aprovacao_baixa' ? 'baixa' : 'extravio';
+            return `<div class="lock-hint" style="margin-top:10px;"><span>⏳</span><span>${tipo === 'baixa' ? 'Baixa' : 'Extravio'} aguardando aprovação da Diretoria.</span></div>`;
+          }
+          if (podeManager) {
+            return `
+              <div class="btn-row" style="margin-bottom:8px;">
+                <button class="btn" data-action="move">↗ Movimentar</button>
+                ${p.status !== 'manutencao' ? `<button class="btn warning" data-action="manut">🔧 Manutenção</button>` : `<button class="btn success" data-action="ret-manut">✓ Retornou</button>`}
+              </div>
+              <div class="btn-row" style="margin-bottom:8px;">
+                <button class="btn outline-red" data-action="baixa">⬇ ${Perms.isDiretoria(u) ? 'Baixar' : 'Solicitar baixa'}</button>
+                <button class="btn secondary"   data-action="extraviado">⚠ ${Perms.isDiretoria(u) ? 'Extraviado' : 'Solicitar extravio'}</button>
+              </div>`;
+          }
+          return `<div class="lock-hint" style="margin-top:10px;"><span>🔒</span><span>Apenas o administrador da categoria pode movimentar este item.</span></div>`;
+        })()}
+        ${podeDeletar ? `
+          <button class="btn danger" data-action="delete" style="margin-top:8px;">🗑 Excluir patrimônio</button>
+        ` : ''}
+
+        <hr class="separator">
+        <h2 style="margin-top:8px;">Histórico</h2>
+        <div class="timeline">
+          ${movs.map(m => renderTimelineEntry(m)).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  const node = wrap.firstElementChild;
+  document.body.appendChild(node);
+  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  node.querySelector('[data-close]').addEventListener('click', () => node.remove());
+
+  const $a = (sel) => node.querySelector(sel);
+  if ($a('[data-action="accept"]')) $a('[data-action="accept"]').addEventListener('click', () => { acceptReceipt(p.id); node.remove(); openDetail(p.id); });
+  if ($a('[data-action="move"]'))   $a('[data-action="move"]').addEventListener('click', () => { node.remove(); openMove(p.id); });
+  if ($a('[data-action="manut"]'))  $a('[data-action="manut"]').addEventListener('click', () => { changeStatus(p.id, 'manutencao', 'Enviado para manutenção'); node.remove(); openDetail(p.id); });
+  if ($a('[data-action="ret-manut"]')) $a('[data-action="ret-manut"]').addEventListener('click', () => { changeStatus(p.id, 'ativo', 'Retorno de manutenção', 'retorno_manutencao'); node.remove(); openDetail(p.id); });
+  if ($a('[data-action="baixa"]'))  $a('[data-action="baixa"]').addEventListener('click', () => { requestBaixa(p.id, 'baixa'); node.remove(); });
+  if ($a('[data-action="extraviado"]')) $a('[data-action="extraviado"]').addEventListener('click', () => { requestBaixa(p.id, 'extravio'); node.remove(); });
+  if ($a('[data-action="approve-cad"]')) $a('[data-action="approve-cad"]').addEventListener('click', () => { approveCadastro(p.id); node.remove(); });
+  if ($a('[data-action="reject-cad"]'))  $a('[data-action="reject-cad"]').addEventListener('click', () => { if(confirm('Rejeitar este cadastro? O item será removido.')){ rejectCadastro(p.id); node.remove(); }});
+  if ($a('[data-action="approve-baixa"]')) $a('[data-action="approve-baixa"]').addEventListener('click', () => { approveBaixa(p.id); node.remove(); });
+  if ($a('[data-action="reject-baixa"]'))  $a('[data-action="reject-baixa"]').addEventListener('click', () => { rejectBaixa(p.id); node.remove(); });
+  if ($a('[data-action="delete"]')) $a('[data-action="delete"]').addEventListener('click', () => { if(confirm('Excluir definitivamente este patrimônio? Esta ação não pode ser desfeita.')){ deletePatrimonio(p.id); node.remove(); }});
+}
+
+function renderTimelineEntry(m) {
+  const u = Lookup.user(m.usuarioId);
+  const isAccept = m.tipo === 'aceite_recebimento';
+  const tipoLabel = ({
+    cadastro:'Cadastro inicial',
+    solicitacao_cadastro:'Solicitação de cadastro',
+    aprovacao_cadastro:'✓ Cadastro aprovado',
+    transferencia_local:'Transferência de local',
+    transferencia_resp:'Transferência de responsável',
+    manutencao:'Enviado para manutenção',
+    retorno_manutencao:'Retorno de manutenção',
+    aceite_recebimento:'✓ Recebimento confirmado',
+    solicitacao_baixa:'Solicitação de baixa',
+    solicitacao_extravio:'Solicitação de extravio',
+    rejeicao_baixa:'✗ Baixa rejeitada',
+    rejeicao_extravio:'✗ Extravio rejeitado',
+    baixa:'Baixa do patrimônio',
+    extravio:'Item extraviado',
+    inventario:'Inventário'
+  })[m.tipo] || m.tipo;
+  let detalhes = '';
+  if (m.destinoLocalId) { const l = Lookup.loc(m.destinoLocalId); if (l) detalhes += '→ ' + l.nome + ' '; }
+  if (m.destinoRespId)  { const r = Lookup.user(m.destinoRespId); if (r) detalhes += '· Resp.: ' + r.nome; }
+  return `
+    <div class="timeline-item ${isAccept?'acceptance':''}">
+      <div class="when">${fmtDateTime(m.data)}</div>
+      <div class="what">${tipoLabel}</div>
+      ${detalhes ? `<div class="meta">${escapeHtml(detalhes)}</div>` : ''}
+      ${m.motivo ? `<div class="meta">${escapeHtml(m.motivo)}</div>` : ''}
+      <div class="who">por ${escapeHtml(u ? u.nome : '—')}</div>
+    </div>
+  `;
+}
+
+/* ============== MOVE / STATUS ============== */
+
+function openMove(patrimonioId) {
+  const p = DB.patrimonios.find(x => x.id === patrimonioId);
+  const u = Lookup.user(DB.currentUser);
+  if (!Perms.canManageCategoria(u, p.categoriaId)) return toast('Sem permissão para esta categoria', 'error');
+
+  const html = `
+    <div class="modal-backdrop" id="modal-move">
+      <div class="modal" onclick="event.stopPropagation()">
+        <button class="close-btn" data-close>&times;</button>
+        <h2>Movimentar bem</h2>
+        <div style="font-size:13px; color:var(--muted); margin-bottom:14px;">${escapeHtml(p.descricao)}</div>
+
+        <div class="lock-hint">
+          <span>ℹ️</span>
+          <span>O destinatário precisará <strong>aceitar o recebimento</strong> para a movimentação ser efetivada.</span>
+        </div>
+
+        <form id="move-form">
+          <div class="form-group">
+            <label>Tipo</label>
+            <select id="m-tipo">
+              <option value="transferencia_local_resp">Transferir local e/ou responsável</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Novo local</label>
+            <select id="m-local">
+              <option value="">— Manter (${escapeHtml((Lookup.loc(p.localizacaoAtualId)||{}).nome || '—')}) —</option>
+              ${DB.localizacoes.map(l => `<option value="${l.id}">${escapeHtml(l.nome)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Novo responsável</label>
+            <select id="m-resp">
+              <option value="">— Manter (${escapeHtml((Lookup.user(p.responsavelAtualId)||{}).nome || '—')}) —</option>
+              ${DB.usuarios.map(c => `<option value="${c.id}">${escapeHtml(c.nome)} (${escapeHtml(c.setor || '—')})</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Motivo / Observação</label>
+            <textarea id="m-motivo" rows="2" placeholder="Ex.: Realocação para nova obra"></textarea>
+          </div>
+          <button type="submit" class="btn">Registrar movimentação</button>
+        </form>
+      </div>
+    </div>
+  `;
+  const wrap = document.createElement('div'); wrap.innerHTML = html;
+  const node = wrap.firstElementChild; document.body.appendChild(node);
+  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  node.querySelector('[data-close]').addEventListener('click', () => node.remove());
+
+  node.querySelector('#move-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const novoLocal = parseInt(node.querySelector('#m-local').value) || null;
+    const novoResp = parseInt(node.querySelector('#m-resp').value) || null;
+    const motivo = node.querySelector('#m-motivo').value.trim();
+    if (!novoLocal && !novoResp) return toast('Escolha local ou responsável', 'error');
+
+    const tipo = novoLocal && novoResp ? 'transferencia_local_resp' : (novoLocal ? 'transferencia_local' : 'transferencia_resp');
+    DB.movimentacoes.push({
+      id: nextId('movimentacoes'),
+      patrimonioId: p.id, tipo,
+      data: new Date().toISOString(),
+      usuarioId: u.id,
+      motivo: motivo || 'Movimentação registrada',
+      destinoLocalId: novoLocal, destinoRespId: novoResp
+    });
+    if (novoLocal) p.localizacaoAtualId = novoLocal;
+    if (novoResp)  p.responsavelAtualId = novoResp;
+    p.status = 'aguardando_aceite';
+    p.atualizadoEm = new Date().toISOString();
+    save();
+    node.remove();
+    toast('Movimentação registrada — aguardando aceite do destinatário', 'success');
+    render();
+  });
+}
+
+function changeStatus(patrimonioId, novoStatus, motivo, tipoMov) {
+  const p = DB.patrimonios.find(x => x.id === patrimonioId);
+  const u = Lookup.user(DB.currentUser);
+  if (!Perms.canManageCategoria(u, p.categoriaId)) return toast('Sem permissão para esta categoria', 'error');
+  p.status = novoStatus;
+  p.atualizadoEm = new Date().toISOString();
+  DB.movimentacoes.push({
+    id: nextId('movimentacoes'), patrimonioId: p.id,
+    tipo: tipoMov || novoStatus, data: new Date().toISOString(),
+    usuarioId: u.id, motivo: motivo || ''
+  });
+  save();
+  toast('Status atualizado', 'success');
+  render();
+}
+
+function acceptReceipt(patrimonioId) {
+  const p = DB.patrimonios.find(x => x.id === patrimonioId);
+  const u = Lookup.user(DB.currentUser);
+  if (p.status !== 'aguardando_aceite' || p.responsavelAtualId !== u.id) {
+    return toast('Apenas o destinatário pode aceitar', 'error');
+  }
+  p.status = 'ativo';
+  p.atualizadoEm = new Date().toISOString();
+  DB.movimentacoes.push({
+    id: nextId('movimentacoes'), patrimonioId: p.id,
+    tipo: 'aceite_recebimento', data: new Date().toISOString(),
+    usuarioId: u.id, motivo: 'Recebimento confirmado pelo destinatário'
+  });
+  save();
+  toast('Recebimento confirmado', 'success');
+  render();
+}
+
+/* ============== APROVAÇÕES DE CADASTRO ============== */
+function approveCadastro(patrimonioId) {
+  const p = DB.patrimonios.find(x => x.id === patrimonioId);
+  const u = Lookup.user(DB.currentUser);
+  if (!p || p.status !== 'aguardando_aprovacao_cadastro') return;
+  if (!Perms.canApproveCadastro(u, p.categoriaId)) return toast('Sem permissão para aprovar', 'error');
+  // Software (cat 3): aprovação vai direto para ativo (não há aceite físico de licença)
+  const isSoft = p.categoriaId === 3;
+  p.status = isSoft ? 'ativo' : 'aguardando_aceite';
+  p.aprovadoPor = u.id; p.aprovadoEm = new Date().toISOString();
+  DB.movimentacoes.push({
+    id: nextId('movimentacoes'), patrimonioId: p.id,
+    tipo: 'aprovacao_cadastro', data: new Date().toISOString(),
+    usuarioId: u.id, motivo: isSoft ? 'Licença aprovada e ativada' : 'Cadastro aprovado'
+  });
+  save();
+  toast(isSoft ? 'Licença aprovada e ativada' : 'Cadastro aprovado — aguardando aceite do responsável', 'success');
+  render();
+}
+function rejectCadastro(patrimonioId) {
+  const p = DB.patrimonios.find(x => x.id === patrimonioId);
+  const u = Lookup.user(DB.currentUser);
+  if (!p || p.status !== 'aguardando_aprovacao_cadastro') return;
+  if (!Perms.canApproveCadastro(u, p.categoriaId)) return toast('Sem permissão para rejeitar', 'error');
+  DB.patrimonios = DB.patrimonios.filter(x => x.id !== p.id);
+  DB.movimentacoes = DB.movimentacoes.filter(m => m.patrimonioId !== p.id);
+  save(); toast('Cadastro rejeitado e removido', 'success'); render();
+}
+
+/* ============== APROVAÇÕES DE BAIXA / EXTRAVIO ============== */
+function requestBaixa(patrimonioId, tipo) {
+  const p = DB.patrimonios.find(x => x.id === patrimonioId);
+  const u = Lookup.user(DB.currentUser);
+  if (!p) return;
+  if (!Perms.canRequestBaixa(u, p.categoriaId)) return toast('Sem permissão', 'error');
+  const label = tipo === 'baixa' ? 'baixa' : 'extravio';
+  if (Perms.isDiretoria(u)) {
+    if (!confirm(`Confirmar ${label} deste patrimônio?`)) return;
+    p.statusAnterior = p.status;
+    p.status = tipo === 'baixa' ? 'baixado' : 'extraviado';
+    p.atualizadoEm = new Date().toISOString();
+    DB.movimentacoes.push({
+      id: nextId('movimentacoes'), patrimonioId: p.id,
+      tipo: tipo === 'baixa' ? 'baixa' : 'extravio',
+      data: new Date().toISOString(), usuarioId: u.id,
+      motivo: tipo === 'baixa' ? 'Baixa do patrimônio (Diretoria)' : 'Item extraviado (Diretoria)'
+    });
+    save(); toast(`${label.charAt(0).toUpperCase()+label.slice(1)} efetivada`, 'success'); render(); return;
+  }
+  const motivo = prompt(`Motivo da solicitação de ${label}:`, '');
+  if (motivo === null) return;
+  p.statusAnterior = p.status;
+  p.status = tipo === 'baixa' ? 'aguardando_aprovacao_baixa' : 'aguardando_aprovacao_extravio';
+  p.solicitadoPor = u.id; p.solicitadoEm = new Date().toISOString(); p.solicitacaoMotivo = motivo;
+  DB.movimentacoes.push({
+    id: nextId('movimentacoes'), patrimonioId: p.id,
+    tipo: tipo === 'baixa' ? 'solicitacao_baixa' : 'solicitacao_extravio',
+    data: new Date().toISOString(), usuarioId: u.id,
+    motivo: motivo || `Solicitação de ${label}`
+  });
+  save(); toast(`Solicitação de ${label} enviada à Diretoria`, 'success'); render();
+}
+function approveBaixa(patrimonioId) {
+  const p = DB.patrimonios.find(x => x.id === patrimonioId);
+  const u = Lookup.user(DB.currentUser);
+  if (!p) return;
+  if (!Perms.canApproveBaixa(u)) return toast('Apenas a Diretoria pode aprovar', 'error');
+  const isBaixa = p.status === 'aguardando_aprovacao_baixa';
+  const isExtr  = p.status === 'aguardando_aprovacao_extravio';
+  if (!isBaixa && !isExtr) return;
+  p.status = isBaixa ? 'baixado' : 'extraviado';
+  p.aprovadoPor = u.id; p.aprovadoEm = new Date().toISOString();
+  DB.movimentacoes.push({
+    id: nextId('movimentacoes'), patrimonioId: p.id,
+    tipo: isBaixa ? 'baixa' : 'extravio',
+    data: new Date().toISOString(), usuarioId: u.id,
+    motivo: isBaixa ? 'Baixa aprovada pela Diretoria' : 'Extravio aprovado pela Diretoria'
+  });
+  save(); toast(`${isBaixa ? 'Baixa' : 'Extravio'} aprovado`, 'success'); render();
+}
+function rejectBaixa(patrimonioId) {
+  const p = DB.patrimonios.find(x => x.id === patrimonioId);
+  const u = Lookup.user(DB.currentUser);
+  if (!p) return;
+  if (!Perms.canApproveBaixa(u)) return toast('Apenas a Diretoria pode rejeitar', 'error');
+  const isBaixa = p.status === 'aguardando_aprovacao_baixa';
+  const isExtr  = p.status === 'aguardando_aprovacao_extravio';
+  if (!isBaixa && !isExtr) return;
+  p.status = p.statusAnterior || 'ativo';
+  delete p.statusAnterior; delete p.solicitadoPor; delete p.solicitadoEm; delete p.solicitacaoMotivo;
+  DB.movimentacoes.push({
+    id: nextId('movimentacoes'), patrimonioId: p.id,
+    tipo: isBaixa ? 'rejeicao_baixa' : 'rejeicao_extravio',
+    data: new Date().toISOString(), usuarioId: u.id,
+    motivo: isBaixa ? 'Baixa rejeitada pela Diretoria' : 'Extravio rejeitado pela Diretoria'
+  });
+  save(); toast('Solicitação rejeitada', 'success'); render();
+}
+
+function deletePatrimonio(patrimonioId) {
+  const u = Lookup.user(DB.currentUser);
+  if (!Perms.canDelete(u)) return toast('Apenas a Diretoria pode excluir', 'error');
+  DB.patrimonios = DB.patrimonios.filter(p => p.id !== patrimonioId);
+  DB.movimentacoes = DB.movimentacoes.filter(m => m.patrimonioId !== patrimonioId);
+  save();
+  toast('Patrimônio excluído', 'success');
+  render();
+}
+
+/* ============== CREATE ============== */
+
+function renderCreate() {
+  const u = Lookup.user(DB.currentUser);
+  if (!Perms.canCreate(u)) {
+    return `<div class="empty-state"><div class="emoji">🔒</div><p>Sem permissão para cadastrar.</p></div>`;
+  }
+  const cats = Perms.allowedCategorias(u);
+  const isOperador = Perms.isOperador(u);
+  return `
+    <div class="page-title">Cadastrar patrimônio</div>
+    ${isOperador ? `
+      <div class="alert-bar" style="cursor:default;">
+        <div class="ab-icon">⏳</div>
+        <div class="ab-body">
+          <div class="ab-title">Cadastro sujeito a aprovação</div>
+          <div class="ab-text">Sua solicitação será revisada pelo administrador da categoria antes de ser ativada.</div>
+        </div>
+      </div>
+    ` : ''}
+    <div class="lock-hint">
+      <span>🔒</span>
+      <span>Após salvar, os campos descritivos <strong>não poderão ser alterados</strong>. Apenas status e movimentações poderão ser editados.</span>
+    </div>
+
+    <form id="create-form" class="card">
+
+      <div class="form-group" id="c-codigo-group">
+        <label>Código de barras / Etiqueta *</label>
+        <div style="display:flex; gap:6px;">
+          <input type="text" id="c-codigo" required style="flex:1;">
+          <button type="button" class="btn secondary" id="c-scan" style="width:auto; padding:10px 14px;">📷</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Categoria *</label>
+        <select id="c-cat" required>
+          ${cats.map(c => `<option value="${c.id}">${c.icone} ${c.nome}</option>`).join('')}
+        </select>
+      </div>
+
+      <!-- ── HARDWARE (cats 1 e 2) ── -->
+      <div id="form-hardware">
+        <div class="form-group">
+          <label>Subcategoria *</label>
+          <select id="c-subcat" required>
+            <option value="">— Selecione —</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Descrição *</label>
+          <input type="text" id="c-desc" placeholder="Ex.: Notebook Dell Latitude 5430">
+        </div>
+      </div>
+
+      <!-- ── SOFTWARES TI / LICENÇA (cat 3) ── -->
+      <div id="form-software" style="display:none">
+        <div class="form-group">
+          <label>Subcategoria *</label>
+          <select id="sw-subcat" required>
+            <option value="">— Selecione —</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Data</label>
+          <input type="date" id="sw-data-registro">
+          <div class="form-help">Data do registro da licença.</div>
+        </div>
+        <div class="form-group">
+          <label>Número da Licença *</label>
+          <input type="text" id="sw-chave" required placeholder="Ex.: XXXXX-XXXXX-XXXXX-XXXXX">
+        </div>
+        <div class="form-group">
+          <label>Validade da Licença</label>
+          <input type="date" id="sw-validade">
+        </div>
+        <div class="form-group">
+          <label>Responsável *</label>
+          <input type="text" id="sw-resp" required placeholder="Nome do responsável">
+        </div>
+        <div class="filter-row">
+          <div class="form-group" style="flex:1">
+            <label>Valor de Aquisição (R$)</label>
+            <input type="number" id="sw-valor" step="0.01" min="0">
+          </div>
+          <div class="form-group" style="flex:1">
+            <label>Data de Aquisição</label>
+            <input type="date" id="sw-data">
+          </div>
+        </div>
+        <button type="submit" class="btn">🔑 Cadastrar licença</button>
+      </div>
+
+      <!-- ── CAMPOS EXCLUSIVOS HARDWARE (cats 1 e 2) ── -->
+      <div id="form-hw-extra">
+        <div class="filter-row">
+          <div class="form-group" style="flex:1;">
+            <label>Nota fiscal</label>
+            <input type="text" id="c-nf">
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label>Data aquisição</label>
+            <input type="date" id="c-data">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Valor de aquisição (R$)</label>
+          <input type="number" id="c-valor" step="0.01" min="0">
+        </div>
+        <div class="form-group">
+          <label>Localização inicial *</label>
+          <select id="c-loc" required>
+            ${DB.localizacoes.map(l => `<option value="${l.id}">${escapeHtml(l.nome)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Responsável inicial *</label>
+          <select id="c-resp" required>
+            ${DB.usuarios.map(c => `<option value="${c.id}" ${c.id===u.id?'selected':''}>${escapeHtml(c.nome)} (${escapeHtml(c.setor || '—')})</option>`).join('')}
+          </select>
+          <div class="form-help">O responsável precisará confirmar o recebimento.</div>
+        </div>
+        <div class="form-group">
+          <label>Observações</label>
+          <textarea id="c-obs" rows="2"></textarea>
+        </div>
+        <button type="submit" class="btn">💾 Cadastrar patrimônio</button>
+      </div>
+    </form>
+  `;
+}
+
+
+function bindCreate() {
+  const u = Lookup.user(DB.currentUser);
+  if (!Perms.canCreate(u)) return;
+
+  const scanBtn = $('#c-scan');
+  if (scanBtn) scanBtn.addEventListener('click', () => openScanner((code) => { $('#c-codigo').value = code; }));
+
+  // Toggle campos software
+  const catSel = $('#c-cat');
+  function toggleSoftwareFields() {
+    if (!catSel) return;
+    const isSoft = parseInt(catSel.value) === 3;
+    const fhw  = $('#form-hardware'),  fsw  = $('#form-software');
+    const fhwx = $('#form-hw-extra');
+    if (fhw)  fhw.style.display  = isSoft ? 'none'  : 'block';
+    if (fhwx) fhwx.style.display = isSoft ? 'none'  : 'block';
+    if (fsw)  fsw.style.display  = isSoft ? 'block' : 'none';
+    if ($('#sw-chave'))  $('#sw-chave').required  = isSoft;
+    if ($('#sw-resp'))   $('#sw-resp').required   = isSoft;
+    if ($('#sw-subcat')) $('#sw-subcat').required = isSoft;
+    if ($('#c-desc'))    $('#c-desc').required    = !isSoft;
+    if ($('#c-loc'))     $('#c-loc').required     = !isSoft;
+    if ($('#c-resp'))    $('#c-resp').required    = !isSoft;
+    if ($('#c-subcat'))  $('#c-subcat').required  = !isSoft;
+    // Código de barras: só usado para hardware (software é auto-gerado)
+    const codGroup = $('#c-codigo-group');
+    const codInput = $('#c-codigo');
+    if (codGroup) codGroup.style.display = isSoft ? 'none' : 'block';
+    if (codInput) codInput.required = !isSoft;
+    // Popular subcategorias hardware
+    const subcatSel = $('#c-subcat');
+    if (subcatSel && !isSoft) {
+      const catId = parseInt(catSel.value);
+      const subs = (DB.subcategorias||[]).filter(s => s.categoriaId === catId);
+      subcatSel.innerHTML = '<option value="">— Selecione —</option>' + subs.map(s => `<option value="${s.id}">${escapeHtml(s.nome)}</option>`).join('');
+    }
+    // Popular subcategorias software (com pré-seleção da primeira)
+    const swSubcatSel = $('#sw-subcat');
+    if (swSubcatSel && isSoft) {
+      const subs = (DB.subcategorias||[]).filter(s => s.categoriaId === 3);
+      swSubcatSel.innerHTML = subs.map((s,i) => `<option value="${s.id}"${i===0?' selected':''}>${escapeHtml(s.nome)}</option>`).join('');
+    }
+    // Pré-preencher Data do registro com hoje
+    const swDataReg = $('#sw-data-registro');
+    if (swDataReg && isSoft && !swDataReg.value) {
+      swDataReg.value = new Date().toISOString().slice(0,10);
+    }
+  }
+  if (catSel) { catSel.addEventListener('change', toggleSoftwareFields); toggleSoftwareFields(); }
+
+
+  $('#create-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const catId = parseInt($('#c-cat').value);
+    const isOperador = Perms.isOperador(u);
+    if (!isOperador && !Perms.canManageCategoria(u, catId)) return toast('Sem permissão para esta categoria', 'error');
+
+    // ── Softwares TI (cat 3) ─────────────────────────────────
+    if (catId === 3) {
+      const chave = $('#sw-chave')  ? $('#sw-chave').value.trim()  : '';
+      const resp  = $('#sw-resp')   ? $('#sw-resp').value.trim()   : '';
+      const swSubcatId = $('#sw-subcat') ? (parseInt($('#sw-subcat').value)||null) : null;
+      if (!swSubcatId) return toast('Selecione a subcategoria', 'error');
+      if (!chave)      return toast('Informe o número da licença', 'error');
+      if (!resp)       return toast('Informe o responsável', 'error');
+      const subcatObj = (DB.subcategorias||[]).find(s => s.id === swSubcatId);
+      const subcatNome = subcatObj ? subcatObj.nome : 'Licença';
+      const descricao  = subcatNome + ' — ' + chave;
+      const autoCode = 'BM-SW-' + String(DB._nextId.patrimonios).padStart(4,'0');
+      const sw = {
+        id: nextId('patrimonios'), codigoBarras: autoCode,
+        categoriaId: 3, subcategoriaId: swSubcatId,
+        descricao: descricao, tipoSoftware: subcatNome,
+        licencaChave: chave,
+        licencaValidade: $('#sw-validade') ? $('#sw-validade').value || null : null,
+        licencaResponsavel: resp,
+        valorAquisicao: parseFloat($('#sw-valor') ? $('#sw-valor').value : '0') || 0,
+        dataAquisicao: $('#sw-data') ? $('#sw-data').value || null : null,
+        dataRegistro:  $('#sw-data-registro') ? $('#sw-data-registro').value || null : null,
+        observacoes: '',
+        status: isOperador ? 'aguardando_aprovacao_cadastro' : 'ativo',
+        criadoPor: u.id, criadoEm: new Date().toISOString(),
+        localizacaoAtualId: null, responsavelAtualId: u.id
+      };
+      DB.patrimonios.push(sw);
+      DB.movimentacoes.push({
+        id: nextId('movimentacoes'), patrimonioId: sw.id,
+        tipo: isOperador ? 'solicitacao_cadastro' : 'cadastro',
+        data: new Date().toISOString(), usuarioId: u.id,
+        motivo: isOperador ? 'Solicitação de cadastro de licença — aguardando aprovação' : 'Licença cadastrada'
+      });
+      save();
+      toast(
+        isOperador
+          ? 'Solicitação enviada — aguardando aprovação do administrador'
+          : 'Licença cadastrada!',
+        'success'
+      );
+      State.tab='list'; render(); return;
+    }
+
+    // ── Hardware (cats 1 e 2) ─────────────────────────────────
+    const codigo = $('#c-codigo').value.trim();
+    if (!codigo) return toast('Informe o código de barras / número do patrimônio', 'error');
+    if (DB.patrimonios.some(p => p.codigoBarras.toLowerCase() === codigo.toLowerCase())) {
+      return toast('Já existe um patrimônio cadastrado com este código: ' + codigo, 'error');
+    }
+    const subcatId = $('#c-subcat') ? (parseInt($('#c-subcat').value)||null) : null;
+    if (!subcatId) return toast('Selecione a subcategoria', 'error');
+
+    const novo = {
+      id: nextId('patrimonios'),
+      codigoBarras: codigo,
+      descricao: $('#c-desc').value.trim(),
+      categoriaId: catId,
+      subcategoriaId: subcatId,
+      notaFiscal: $('#c-nf').value.trim(),
+      dataAquisicao: $('#c-data').value || null,
+      valorAquisicao: parseFloat($('#c-valor').value) || 0,
+      localizacaoAtualId: parseInt($('#c-loc').value),
+      responsavelAtualId: parseInt($('#c-resp').value),
+      observacoes: $('#c-obs').value.trim(),
+      status: isOperador ? 'aguardando_aprovacao_cadastro' : 'aguardando_aceite',
+      criadoPor: u.id,
+      criadoEm: new Date().toISOString()
+    };
+    DB.patrimonios.push(novo);
+    DB.movimentacoes.push({
+      id: nextId('movimentacoes'), patrimonioId: novo.id,
+      tipo: isOperador ? 'solicitacao_cadastro' : 'cadastro',
+      data: new Date().toISOString(),
+      usuarioId: u.id,
+      motivo: isOperador ? 'Solicitação de cadastro — aguardando aprovação' : 'Cadastro inicial',
+      destinoLocalId: novo.localizacaoAtualId, destinoRespId: novo.responsavelAtualId
+    });
+    save();
+    toast(
+      isOperador
+        ? 'Solicitação enviada — aguardando aprovação do administrador'
+        : 'Cadastrado — aguardando aceite do responsável',
+      'success'
+    );
+    State.tab = 'list';
+    render();
+  });
+}
+
+/* ============== PENDING ACCEPTANCES ============== */
+
+function renderPending() {
+  const u = Lookup.user(DB.currentUser);
+  const meus = Lookup.pendingForUser(u.id);
+  const todosPending = DB.patrimonios.filter(p => p.status === 'aguardando_aceite');
+  const noEscopo = Perms.isAdmin(u)
+    ? todosPending.filter(p => Perms.isDiretoria(u) || Perms.canManageCategoria(u, p.categoriaId))
+    : [];
+  const cadastrosParaAprovar = Lookup.pendingCadastrosForApprover(u);
+  const baixasParaAprovar = Lookup.pendingBaixasForDiretoria(u);
+  const meusCadastrosPendentes = Perms.isOperador(u)
+    ? DB.patrimonios.filter(p => p.status === 'aguardando_aprovacao_cadastro' && p.criadoPor === u.id)
+    : [];
+
+  return `
+    <div class="page-title">Pendências e aprovações</div>
+
+    <div class="card">
+      <h2>Aguardando seu aceite <span class="pill">${meus.length}</span></h2>
+      <div class="card-hint">Você precisa confirmar o recebimento destes itens.</div>
+      ${meus.length ? `
+        <div class="item-list">
+          ${meus.map(p => renderItemCard(p)).join('')}
+        </div>
+      ` : `<div class="empty-state" style="padding:20px;"><div class="emoji">✅</div><p>Tudo em dia.</p></div>`}
+    </div>
+
+    ${Perms.canApproveCadastro(u, 1) || Perms.canApproveCadastro(u, 2) ? `
+      <div class="card">
+        <h2>Cadastros aguardando sua aprovação <span class="pill">${cadastrosParaAprovar.length}</span></h2>
+        <div class="card-hint">Solicitações de cadastro feitas por operadores.</div>
+        ${cadastrosParaAprovar.length ? `
+          <div class="item-list">${cadastrosParaAprovar.map(p => renderItemCard(p)).join('')}</div>
+        ` : `<div class="empty-state" style="padding:20px;"><div class="emoji">📭</div><p>Nenhuma solicitação.</p></div>`}
+      </div>
+    ` : ''}
+
+    ${Perms.isDiretoria(u) ? `
+      <div class="card">
+        <h2>Baixas e extravios aguardando aprovação <span class="pill">${baixasParaAprovar.length}</span></h2>
+        <div class="card-hint">Solicitações dos administradores que precisam de sua aprovação.</div>
+        ${baixasParaAprovar.length ? `
+          <div class="item-list">${baixasParaAprovar.map(p => renderItemCard(p)).join('')}</div>
+        ` : `<div class="empty-state" style="padding:20px;"><div class="emoji">📭</div><p>Nenhuma solicitação.</p></div>`}
+      </div>
+    ` : ''}
+
+    ${Perms.isOperador(u) ? `
+      <div class="card">
+        <h2>Meus cadastros aguardando aprovação <span class="pill">${meusCadastrosPendentes.length}</span></h2>
+        <div class="card-hint">Solicitações que você enviou e aguardam aprovação do administrador.</div>
+        ${meusCadastrosPendentes.length ? `
+          <div class="item-list">${meusCadastrosPendentes.map(p => renderItemCard(p)).join('')}</div>
+        ` : `<div class="empty-state" style="padding:20px;"><div class="emoji">📭</div><p>Nenhuma solicitação em andamento.</p></div>`}
+      </div>
+    ` : ''}
+
+    ${Perms.isAdmin(u) ? `
+      <div class="card">
+        <h2>Outros aceites pendentes (sua área) <span class="pill">${noEscopo.filter(p => p.responsavelAtualId !== u.id).length}</span></h2>
+        <div class="card-hint">Itens aguardando aceite de outros usuários.</div>
+        ${noEscopo.filter(p => p.responsavelAtualId !== u.id).length ? `
+          <div class="item-list">${noEscopo.filter(p => p.responsavelAtualId !== u.id).map(p => renderItemCard(p)).join('')}</div>
+        ` : `<div class="empty-state" style="padding:20px;"><div class="emoji">📭</div><p>Nenhum pendente.</p></div>`}
+      </div>
+    ` : ''}
+  `;
+}
+function bindPending() {
+  $$('[data-action="open"]').forEach(el => el.addEventListener('click', () => openDetail(parseInt(el.dataset.id))));
+}
+
+/* ============== MORE ============== */
+
+function renderMore() {
+  const u = Lookup.user(DB.currentUser);
+  const isAdmin = Perms.isAdmin(u);
+  return `
+    <div class="page-title">Mais</div>
+
+    ${isAdmin ? `
+      <div class="card">
+        <h2>Inventário</h2>
+        <div class="card-hint">Faça uma conferência por local escaneando os códigos.</div>
+        <button class="btn" data-action="inv-start">📦 Iniciar inventário</button>
+      </div>
+
+      <div class="card">
+        <h2>Relatórios</h2>
+        <div class="quick-actions">
+          <button class="quick-action" data-action="rel-cat"><span class="qa-icon">📊</span>Por categoria</button>
+          <button class="quick-action" data-action="rel-loc"><span class="qa-icon">📍</span>Por localização</button>
+          <button class="quick-action" data-action="rel-resp"><span class="qa-icon">👤</span>Por responsável</button>
+          <button class="quick-action" data-action="export"><span class="qa-icon">⬇</span>Exportar CSV</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Cadastros auxiliares</h2>
+        <div class="quick-actions">
+          <button class="quick-action" data-action="cad-loc"><span class="qa-icon">📍</span>Localizações</button>
+          <button class="quick-action" data-action="cad-user"><span class="qa-icon">👥</span>Usuários</button>
+          <button class="quick-action" data-action="cad-subcat"><span class="qa-icon">🏷️</span>Subcategorias</button>
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="card">
+      <h2>Conta</h2>
+      <div class="detail-row"><span class="label">Usuário</span><span class="value">${escapeHtml(u.nome)}</span></div>
+      <div class="detail-row"><span class="label">E-mail</span><span class="value">${escapeHtml(u.email)}</span></div>
+      <div class="detail-row"><span class="label">Perfil</span><span class="value"><span class="role-chip ${u.perfil}">${Perms.perfilLabel(u.perfil)}</span></span></div>
+      <button class="btn dark" data-action="logout" style="margin-top:14px;">⎋ Sair da conta</button>
+    </div>
+
+    <div class="card">
+      <h2>📲 Notificações WhatsApp</h2>
+      <div class="card-hint">Configure para receber notificações sobre seus itens e pendências.<br>
+        <a href="https://www.callmebot.com/blog/free-api-whatsapp-messages/" target="_blank" style="color:var(--brand-orange)">Como ativar o CallMeBot →</a>
+      </div>
+      <div class="form-group" style="margin-top:12px">
+        <label>Telefone (com código do país, ex: 5511999999999)</label>
+        <input type="tel" id="wa-phone" value="${escapeHtml(u.whatsappPhone||'')}" placeholder="5511999999999">
+      </div>
+      <div class="form-group">
+        <label>Chave API do CallMeBot</label>
+        <input type="text" id="wa-apikey" value="${escapeHtml(u.whatsappApiKey||'')}" placeholder="123456">
+      </div>
+      <button class="btn" data-action="save-whatsapp" style="margin-top:4px">💾 Salvar configuração</button>
+      <button class="btn secondary" data-action="test-whatsapp" style="margin-top:8px">🔔 Enviar mensagem de teste</button>
+    </div>
+
+
+    <div class="card">
+      <h2>Sobre</h2>
+      <div class="detail-row"><span class="label">Sistema</span><span class="value">Brandão &amp; Marmo — Controle de Patrimônio</span></div>
+    </div>
+  `;
+}
+
+function bindMore() {
+  $$('[data-action="logout"]').forEach(b => b.addEventListener('click', () => {
+    if (!confirm('Encerrar a sessão?')) return;
+    DB.currentUser = null; save(); State.tab = 'home'; render();
+  }));
+  $$('[data-action="inv-start"]').forEach(b => b.addEventListener('click', openInventoryStart));
+  $$('[data-action="rel-cat"]').forEach(b => b.addEventListener('click', () => openReport('cat')));
+  $$('[data-action="rel-loc"]').forEach(b => b.addEventListener('click', () => openReport('loc')));
+  $$('[data-action="rel-resp"]').forEach(b => b.addEventListener('click', () => openReport('resp')));
+  $$('[data-action="export"]').forEach(b => b.addEventListener('click', exportCSV));
+  $$('[data-action="cad-loc"]').forEach(b => b.addEventListener('click', openCadLoc));
+  $$('[data-action="cad-user"]').forEach(b => b.addEventListener('click', openCadUser));
+  $$('[data-action="cad-subcat"]').forEach(b => b.addEventListener('click', openCadSubcat));
+  $$('[data-action="cad-sw"]').forEach(b => b.addEventListener('click', () => { State.tab='create'; render(); setTimeout(()=>{ const s=$('#c-cat'); if(s){s.value='3'; s.dispatchEvent(new Event('change')); const sw=$('#software-fields'); if(sw) sw.style.display='block'; } },100); }));
+  $$('[data-action="save-whatsapp"]').forEach(b => b.addEventListener('click', () => {
+    const phone  = $('#wa-phone')  ? $('#wa-phone').value.trim()  : '';
+    const apikey = $('#wa-apikey') ? $('#wa-apikey').value.trim() : '';
+    const u = DB.usuarios.find(x => x.id === DB.currentUser);
+    if (!u) return;
+    u.whatsappPhone  = phone;
+    u.whatsappApiKey = apikey;
+    save();
+    toast('Configuração de WhatsApp salva!', 'success');
+  }));
+
+  $$('[data-action="test-whatsapp"]').forEach(b => b.addEventListener('click', async () => {
+    const phone  = $('#wa-phone')  ? $('#wa-phone').value.trim()  : '';
+    const apikey = $('#wa-apikey') ? $('#wa-apikey').value.trim() : '';
+    if (!phone || !apikey) return toast('Preencha telefone e chave API primeiro', 'error');
+    const msg = '[B&M Patrimônio] Teste de notificação — sistema configurado com sucesso!';
+    const url = `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(msg)}&apikey=${encodeURIComponent(apikey)}`;
+    try {
+      toast('Enviando mensagem de teste...', 'success');
+      await fetch(url, { mode: 'no-cors' });
+    } catch(e) { /* no-cors — ignora erro de CORS */ }
+    toast('Mensagem enviada! Verifique seu WhatsApp.', 'success');
+  }));
+
+}
+
+/* ============== INVENTORY ============== */
+
+let inventoryState = null;
+
+function openInventoryStart() {
+  const html = `
+    <div class="modal-backdrop" id="modal-inv">
+      <div class="modal" onclick="event.stopPropagation()">
+        <button class="close-btn" data-close>&times;</button>
+        <h2>Iniciar inventário</h2>
+        <div class="form-group">
+          <label>Local a inventariar</label>
+          <select id="inv-loc">
+            ${DB.localizacoes.map(l => `<option value="${l.id}">${escapeHtml(l.nome)}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn" id="inv-go">Começar</button>
+      </div>
+    </div>
+  `;
+  const wrap = document.createElement('div'); wrap.innerHTML = html;
+  const node = wrap.firstElementChild; document.body.appendChild(node);
+  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  node.querySelector('[data-close]').addEventListener('click', () => node.remove());
+  node.querySelector('#inv-go').addEventListener('click', () => {
+    const locId = parseInt(node.querySelector('#inv-loc').value);
+    inventoryState = { locId, lidos: new Set(), inicio: new Date().toISOString() };
+    node.remove();
+    openInventoryRunning();
+  });
+}
+
+function openInventoryRunning() {
+  const me = Lookup.user(DB.currentUser);
+  const visible = Lookup.visibleItems(me);
+  const loc = Lookup.loc(inventoryState.locId);
+  const esperados = visible.filter(p => p.localizacaoAtualId === inventoryState.locId);
+  const lidos = Array.from(inventoryState.lidos);
+  const lidosObjs = lidos.map(c => visible.find(p => p.codigoBarras === c)).filter(Boolean);
+  const faltantes = esperados.filter(p => !inventoryState.lidos.has(p.codigoBarras));
+  const fora = lidosObjs.filter(p => p.localizacaoAtualId !== inventoryState.locId);
+
+  const html = `
+    <div class="modal-backdrop" id="modal-invrun">
+      <div class="modal" onclick="event.stopPropagation()">
+        <button class="close-btn" data-close>&times;</button>
+        <h2>Inventário · ${escapeHtml(loc.nome)}</h2>
+
+        <div class="stat-grid">
+          <div class="stat"><div class="label">Esperados</div><div class="value">${esperados.length}</div></div>
+          <div class="stat"><div class="label">Lidos</div><div class="value">${lidos.length}</div></div>
+          <div class="stat alert"><div class="label">Faltantes</div><div class="value">${faltantes.length}</div></div>
+          <div class="stat alert"><div class="label">Fora do local</div><div class="value">${fora.length}</div></div>
+        </div>
+
+        <button class="btn" id="inv-scan">📷 Escanear próximo</button>
+
+        ${faltantes.length ? `
+          <h2 style="margin-top:14px;">Faltantes</h2>
+          <div class="item-list">${faltantes.map(p => renderItemCard(p)).join('')}</div>
+        ` : ''}
+        ${fora.length ? `
+          <h2 style="margin-top:14px;">Fora do local</h2>
+          <div class="item-list">${fora.map(p => renderItemCard(p)).join('')}</div>
+        ` : ''}
+
+        <button class="btn dark" id="inv-end" style="margin-top:14px;">Finalizar inventário</button>
+      </div>
+    </div>
+  `;
+  const wrap = document.createElement('div'); wrap.innerHTML = html;
+  const node = wrap.firstElementChild; document.body.appendChild(node);
+  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  node.querySelector('[data-close]').addEventListener('click', () => node.remove());
+
+  node.querySelector('#inv-scan').addEventListener('click', () => {
+    node.remove();
+    openScanner((code) => {
+      inventoryState.lidos.add(code);
+      const found = DB.patrimonios.find(p => p.codigoBarras === code);
+      if (found) toast('✓ ' + found.descricao.substring(0, 40), 'success');
+      else toast('Código desconhecido: ' + code, 'error');
+      setTimeout(openInventoryRunning, 200);
+    }, true);
+  });
+  node.querySelector('#inv-end').addEventListener('click', () => {
+    const u = Lookup.user(DB.currentUser);
+    const inv = {
+      id: nextId('inventarios'),
+      localizacaoId: inventoryState.locId,
+      iniciadoPor: u.id,
+      iniciadoEm: inventoryState.inicio,
+      finalizadoEm: new Date().toISOString(),
+      esperados: esperados.length,
+      lidos: lidos.length,
+      faltantes: faltantes.length,
+      fora: fora.length
+    };
+    DB.inventarios.push(inv); save();
+    inventoryState = null;
+    node.remove();
+    toast('Inventário finalizado', 'success');
+    render();
+  });
+}
+
+/* ============== SCANNER ============== */
+
+let codeReader = null;
+function openScanner(onCode, keepOpen=false) {
+  const html = `
+    <div class="modal-backdrop" id="modal-scan">
+      <div class="modal" onclick="event.stopPropagation()">
+        <button class="close-btn" data-close>&times;</button>
+        <h2>Escanear código</h2>
+        <div class="scanner-container">
+          <video id="scanner-video" playsinline></video>
+          <div class="scanner-overlay"></div>
+          <div class="scanner-status" id="scanner-status">Aponte para o código de barras</div>
+        </div>
+        <div class="form-group" style="margin-top:14px;">
+          <label>Ou digite o código manualmente</label>
+          <input type="text" id="manual-code" placeholder="Ex.: BM-TI-0001">
+        </div>
+        <button class="btn" id="manual-go">Confirmar código</button>
+      </div>
+    </div>
+  `;
+  const wrap = document.createElement('div'); wrap.innerHTML = html;
+  const node = wrap.firstElementChild; document.body.appendChild(node);
+  const close = () => {
+    if (codeReader) { try { codeReader.reset(); } catch {} codeReader = null; }
+    node.remove();
+  };
+  node.addEventListener('click', e => { if (e.target === node) close(); });
+  node.querySelector('[data-close]').addEventListener('click', close);
+
+  const handleCode = (code) => {
+    if (!onCode) {
+      // default: try to find and open
+      const p = DB.patrimonios.find(p => p.codigoBarras === code);
+      if (p) { close(); openDetail(p.id); }
+      else { node.querySelector('#scanner-status').textContent = 'Código não cadastrado: ' + code; }
+      return;
+    }
+    if (keepOpen) {
+      onCode(code);
+      close();
+    } else {
+      onCode(code);
+      close();
+    }
+  };
+
+  node.querySelector('#manual-go').addEventListener('click', () => {
+    const c = node.querySelector('#manual-code').value.trim();
+    if (!c) return;
+    handleCode(c);
+  });
+
+  // Try to start camera
+  try {
+    if (typeof ZXing === 'undefined') throw new Error('ZXing não carregou');
+    codeReader = new ZXing.BrowserMultiFormatReader();
+    codeReader.decodeFromVideoDevice(null, 'scanner-video', (result, err) => {
+      if (result) {
+        node.querySelector('#scanner-status').textContent = '✓ Lido: ' + result.text;
+        handleCode(result.text);
+      }
+    }).catch(e => {
+      node.querySelector('#scanner-status').textContent = 'Sem acesso à câmera. Use o campo abaixo.';
+    });
+  } catch (e) {
+    node.querySelector('#scanner-status').textContent = 'Câmera indisponível. Digite manualmente.';
+  }
+}
+
+/* ============== REPORTS ============== */
+
+function openReport(kind) {
+  const me = Lookup.user(DB.currentUser);
+  const base = Lookup.visibleItems(me);
+  let titulo, rows;
+  if (kind === 'cat') {
+    titulo = 'Por categoria';
+    rows = DB.categorias.map(c => {
+      const items = base.filter(p => p.categoriaId === c.id);
+      return { nome: c.icone+' '+c.nome, qtd: items.length, valor: items.reduce((s,p) => s+(p.valorAquisicao||0), 0) };
+    }).filter(r => r.qtd > 0);
+  } else if (kind === 'loc') {
+    titulo = 'Por localização';
+    rows = DB.localizacoes.map(l => {
+      const items = base.filter(p => p.localizacaoAtualId === l.id);
+      return { nome: l.nome, qtd: items.length, valor: items.reduce((s,p) => s+(p.valorAquisicao||0), 0) };
+    }).filter(r => r.qtd > 0);
+  } else {
+    titulo = 'Por responsável';
+    rows = DB.usuarios.map(u => {
+      const items = base.filter(p => p.responsavelAtualId === u.id);
+      return { nome: u.nome+' ('+(u.setor||'—')+')', qtd: items.length, valor: items.reduce((s,p) => s+(p.valorAquisicao||0), 0) };
+    }).filter(r => r.qtd > 0);
+  }
+  const html = `
+    <div class="modal-backdrop" id="modal-rep">
+      <div class="modal" onclick="event.stopPropagation()">
+        <button class="close-btn" data-close>&times;</button>
+        <h2>Relatório · ${titulo}</h2>
+        <div class="card" style="padding:0;">
+          ${rows.map(r => `
+            <div class="detail-row" style="padding:12px;">
+              <span class="label" style="color:var(--text); font-weight:600;">${escapeHtml(r.nome)}</span>
+              <span class="value">${r.qtd} itens · ${fmtMoney(r.valor)}</span>
+            </div>
+          `).join('') || '<div class="empty-state"><p>Sem dados.</p></div>'}
+        </div>
+      </div>
+    </div>
+  `;
+  const wrap = document.createElement('div'); wrap.innerHTML = html;
+  const node = wrap.firstElementChild; document.body.appendChild(node);
+  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  node.querySelector('[data-close]').addEventListener('click', () => node.remove());
+}
+
+function exportCSV() {
+  const me = Lookup.user(DB.currentUser);
+  const sep = ';';
+  const headers = ['Codigo','Descricao','Categoria','NF','Aquisicao','Valor','Status','Localizacao','Responsavel'];
+  const rows = Lookup.visibleItems(me).map(p => [
+    p.codigoBarras,
+    (p.descricao||'').replace(/[\r\n;]/g,' '),
+    (Lookup.cat(p.categoriaId)||{}).nome || '',
+    p.notaFiscal||'',
+    p.dataAquisicao||'', (p.valorAquisicao||0).toFixed(2).replace('.',','),
+    statusLabel(p.status),
+    (Lookup.loc(p.localizacaoAtualId)||{}).nome || '',
+    (Lookup.user(p.responsavelAtualId)||{}).nome || ''
+  ]);
+  const csv = '﻿' + [headers, ...rows].map(r => r.join(sep)).join('\n');
+  const blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'patrimonio_brandao_marmo.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast('CSV exportado', 'success');
+}
+
+/* ============== CADASTROS AUX ============== */
+
+function openCadSubcat() {
+  const u = Lookup.user(DB.currentUser);
+  if (!Perms.isAdmin(u)) return toast('Apenas admins', 'error');
+  const cats = DB.categorias;
+  const html2 = `
+    <div class="modal-backdrop" id="modal-sc">
+      <div class="modal" onclick="event.stopPropagation()">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border);">
+          <button class="btn secondary" data-close style="width:auto;padding:6px 14px;font-size:13px;">← Voltar</button>
+          <h2 style="margin:0;font-size:18px;">Subcategorias</h2>
+        </div>
+        ${cats.map(cat => `
+          <div style="margin-bottom:10px;font-weight:700;color:var(--brand-navy)">${cat.icone} ${cat.nome}</div>
+          <div class="item-list" style="margin-bottom:8px;">
+            ${(DB.subcategorias||[]).filter(s=>s.categoriaId===cat.id).map(s=>`
+              <div class="item" style="padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                <div class="item-info" style="flex:1"><div class="title">${escapeHtml(s.nome)}</div></div>
+                <button class="btn secondary sc-del" data-sc-id="${s.id}" title="Excluir subcategoria" style="width:auto;padding:4px 10px;font-size:13px;color:var(--danger);border-color:var(--danger);">🗑️</button>
+              </div>`).join('') || '<div style="color:var(--muted);font-size:13px;padding:4px 0">Nenhuma subcategoria</div>'}
+          </div>
+        `).join('')}
+        <form id="subcat-form" style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">
+          <div class="filter-row">
+            <div class="form-group" style="flex:1">
+              <label>Categoria</label>
+              <select id="sc-cat">${cats.map(c=>`<option value="${c.id}">${c.icone} ${c.nome}</option>`).join('')}</select>
+            </div>
+            <div class="form-group" style="flex:2">
+              <label>Nome da subcategoria</label>
+              <input type="text" id="sc-nome" required placeholder="Ex.: Computadores">
+            </div>
+          </div>
+          <button class="btn" style="width:100%">+ Adicionar</button>
+        </form>
+      </div>
+    </div>`;
+  const wrap = document.createElement('div'); wrap.innerHTML = html2;
+  const node = wrap.firstElementChild; document.body.appendChild(node);
+  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  node.querySelector('[data-close]').addEventListener('click', () => node.remove());
+  node.querySelector('#subcat-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const catId = parseInt(node.querySelector('#sc-cat').value);
+    const nome = node.querySelector('#sc-nome').value.trim();
+    if (!nome) return;
+    if (!DB.subcategorias) DB.subcategorias = [];
+    DB.subcategorias.push({ id: nextId('subcategorias'), nome, categoriaId: catId });
+    save(); node.remove(); toast('Subcategoria adicionada', 'success'); openCadSubcat();
+  });
+  // Excluir subcategoria — respeita permissão por categoria
+  node.querySelectorAll('.sc-del').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const scId = parseInt(btn.dataset.scId);
+      const sub  = (DB.subcategorias||[]).find(s => s.id === scId);
+      if (!sub) return;
+      if (!Perms.canManageCategoria(u, sub.categoriaId)) {
+        const cat = Lookup.cat(sub.categoriaId);
+        return toast(`Sem permissão para excluir subcategorias de "${cat ? cat.nome : 'esta categoria'}".`, 'error');
+      }
+      const emUso = (DB.patrimonios||[]).filter(p => p.subcategoriaId === scId).length;
+      if (emUso > 0) {
+        return toast(`Não é possível excluir: ${emUso} patrimônio(s) usam "${sub.nome}".`, 'error');
+      }
+      if (!confirm(`Excluir a subcategoria "${sub.nome}"?\nEsta ação não pode ser desfeita.`)) return;
+      DB.subcategorias = DB.subcategorias.filter(s => s.id !== scId);
+      save(); node.remove(); toast('Subcategoria excluída', 'success'); openCadSubcat();
+    });
+  });
+}
+
+
+function openCadLoc() {
+  const u = Lookup.user(DB.currentUser);
+  if (!Perms.isAdmin(u)) return toast('Apenas admins', 'error');
+  const html = `
+    <div class="modal-backdrop" id="modal-cl">
+      <div class="modal" onclick="event.stopPropagation()">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border);">
+          <button class="btn secondary" data-close style="width:auto;padding:6px 14px;font-size:13px;">← Voltar</button>
+          <h2 style="margin:0;font-size:18px;">Localizações</h2>
+        </div>
+        <div class="item-list" style="margin-bottom:12px;">
+          ${DB.localizacoes.map(l => {
+          const tipoIcon = l.tipo==='obra'?'🏗️':l.tipo==='escritorio'?'🏢':l.tipo==='deposito'?'📦':'📍';
+          const tipoLabel = l.tipo==='obra'?'Obra':l.tipo==='escritorio'?'Escritório':l.tipo==='deposito'?'Depósito':l.tipo;
+          return `<div class="item"><div class="item-icon">${tipoIcon}</div><div class="item-info"><div class="title">${escapeHtml(l.nome)}</div><div class="subtitle">${tipoLabel}</div></div></div>`;
+        }).join('')}
+        </div>
+        <form id="loc-form">
+          <div class="form-group"><label>Nome</label><input type="text" id="l-nome" required></div>
+          <div class="form-group"><label>Tipo</label>
+            <select id="l-tipo">
+              <option value="obra">🏗️ Obra</option>
+              <option value="escritorio">🏢 Escritório</option>
+              <option value="deposito">📦 Depósito</option>
+            </select>
+          </div>
+          <button class="btn">Adicionar</button>
+        </form>
+      </div>
+    </div>
+  `;
+  const wrap = document.createElement('div'); wrap.innerHTML = html;
+  const node = wrap.firstElementChild; document.body.appendChild(node);
+  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  node.querySelector('[data-close]').addEventListener('click', () => node.remove());
+  node.querySelector('#loc-form').addEventListener('submit', e => {
+    e.preventDefault();
+    DB.localizacoes.push({ id: nextId('localizacoes'), nome: node.querySelector('#l-nome').value.trim(), tipo: node.querySelector('#l-tipo').value, parent: null });
+    save(); node.remove(); toast('Localização adicionada', 'success'); openCadLoc();
+  });
+}
+
+function openCadUser() {
+  const u = Lookup.user(DB.currentUser);
+  if (!Perms.isAdmin(u)) return toast('Apenas administradores podem gerenciar usuários', 'error');
+
+  // Perfis que o usuário atual pode criar
+  const perfisDisp =
+    u.perfil === 'diretoria'   ? [['operador','Operador'],['admin_ti','Administrador TI'],['admin_obras','Administrador Obras'],['diretoria','Diretoria']] :
+    u.perfil === 'admin_ti'    ? [['operador','Operador']] :
+    u.perfil === 'admin_obras' ? [['operador','Operador']] : [];
+
+  const podeRemover = (alvo) => {
+    if (alvo.id === u.id) return false; // não pode se remover
+    if (Lookup.hasItemsUnderCustody(alvo.id)) return false;
+    if (u.perfil === 'diretoria') return true;
+    // admin_ti/obras só remove operadores
+    return alvo.perfil === 'operador';
+  };
+
+  const html = `
+    <div class="modal-backdrop" id="modal-cu">
+      <div class="modal" onclick="event.stopPropagation()">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border);">
+          <button class="btn secondary" data-close style="width:auto;padding:6px 14px;font-size:13px;">← Voltar</button>
+          <h2 style="margin:0;font-size:18px;">Usuários</h2>
+        </div>
+        <div class="item-list" style="margin-bottom:12px;">
+          ${DB.usuarios.map(x => {
+            const temBens = Lookup.hasItemsUnderCustody(x.id);
+            const remov = podeRemover(x);
+            return `
+              <div class="item">
+                <div class="item-icon">👤</div>
+                <div class="item-info">
+                  <div class="title">${escapeHtml(x.nome)}</div>
+                  <div class="subtitle">${escapeHtml(x.email)} · <span class="role-chip ${x.perfil}">${Perms.perfilLabel(x.perfil)}</span></div>
+                  ${temBens ? `<div style="font-size:11px; color:var(--warning); margin-top:2px;">🔒 Possui bens sob custódia</div>` : ''}
+                </div>
+                ${remov ? `<button class="btn danger" data-del="${x.id}" style="width:auto; padding:6px 10px; font-size:12px;">Excluir</button>` : ''}
+              </div>
+            `;
+          }).join('')}
+        </div>
+        <h2 style="margin-top:14px;">Adicionar usuário</h2>
+        <form id="user-form">
+          <div class="form-group"><label>Nome</label><input type="text" id="u-nome" required></div>
+          <div class="form-group"><label>E-mail</label><input type="email" id="u-email" required></div>
+          <div class="form-group"><label>Setor</label><input type="text" id="u-setor"></div>
+          <div class="form-group"><label>Senha inicial</label><input type="text" id="u-senha" required></div>
+          <div class="form-group"><label>Perfil</label>
+            <select id="u-perfil">
+              ${perfisDisp.map(([v,l]) => `<option value="${v}">${l}</option>`).join('')}
+            </select>
+          </div>
+          <button class="btn">Adicionar</button>
+        </form>
+      </div>
+    </div>
+  `;
+  const wrap = document.createElement('div'); wrap.innerHTML = html;
+  const node = wrap.firstElementChild; document.body.appendChild(node);
+  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  node.querySelector('[data-close]').addEventListener('click', () => node.remove());
+
+  node.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
+    const targetId = parseInt(b.dataset.del);
+    const target = Lookup.user(targetId);
+    if (!target) return;
+    if (Lookup.hasItemsUnderCustody(targetId)) {
+      return toast('Não é possível excluir: usuário possui bens sob custódia', 'error');
+    }
+    if (!confirm(`Excluir o usuário ${target.nome}?`)) return;
+    DB.usuarios = DB.usuarios.filter(x => x.id !== targetId);
+    save(); node.remove(); toast('Usuário excluído', 'success'); openCadUser();
+  }));
+
+  node.querySelector('#user-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const email = node.querySelector('#u-email').value.trim().toLowerCase();
+    if (DB.usuarios.some(x => x.email.toLowerCase() === email)) {
+      return toast('Já existe um usuário com este e-mail', 'error');
+    }
+    DB.usuarios.push({
+      id: nextId('usuarios'),
+      nome: node.querySelector('#u-nome').value.trim(),
+      email: node.querySelector('#u-email').value.trim(),
+      setor: node.querySelector('#u-setor').value.trim(),
+      senha: node.querySelector('#u-senha').value,
+      perfil: node.querySelector('#u-perfil').value
+    });
+    save(); node.remove(); toast('Usuário adicionado', 'success'); openCadUser();
+  });
+}
+
+/* ============== INIT ============== */
+(async () => {
+  // Mostra loading enquanto carrega do Supabase
+  const appEl = document.getElementById('app');
+  if (appEl) appEl.innerHTML = '<div style="padding:60px 20px;text-align:center;color:#1B2A5E;font-family:sans-serif;"><div style="font-size:32px;margin-bottom:16px;">⏳</div><div style="font-weight:700;">Carregando...</div></div>';
+
+  try {
+    DB = await Storage.load();
+  } catch (e) {
+    console.error('Erro ao carregar dados:', e);
+  }
+  render();
+
+  // Realtime: quando outro usuário alterar, recarrega o estado e re-renderiza
+  Storage.subscribe((newData) => {
+    if (!newData) return;
+    const myUserId = DB && DB.currentUser;
+    DB = newData;
+    // Mantém a sessão local (currentUser não vem do Supabase)
+    if (myUserId) DB.currentUser = myUserId;
+    render();
+  });
+})();
+</script>
+</body>
+</html>
