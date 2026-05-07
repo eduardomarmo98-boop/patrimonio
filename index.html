@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#1B2A5E">
 <meta name="description" content="Controle de Patrimônio Brandão & Marmo Engenharia">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Patrimônio">
@@ -413,16 +414,14 @@ const SB = (typeof supabase !== 'undefined' && SUPABASE_URL && SUPABASE_KEY)
   : null;
 
 /* ------------------------------------------------------------ */
-const Storage = {
+const BMStore = {
   KEY: 'bm_patrimonio_prod',
-  USER_KEY: 'bm_patrimonio_currentUser',  // sessão local (NUNCA sincronizada)
+  USER_KEY: 'bm_patrimonio_currentUser',
   _saving: false,
   _pending: null,
 
-  // Remove currentUser antes de subir/baixar do Supabase
   _stripSession(d) { if (!d) return d; const { currentUser, ...rest } = d; return rest; },
 
-  // Lê a sessão local (qual usuário está logado neste navegador)
   loadSession() {
     const raw = localStorage.getItem(this.USER_KEY);
     return raw ? parseInt(raw) || null : null;
@@ -443,7 +442,6 @@ const Storage = {
           localStorage.setItem(this.KEY, JSON.stringify(this._stripSession(merged)));
           return merged;
         }
-        // Sem dados ainda — semeia e envia (sem currentUser)
         const seeded = this.seed();
         await SB.from('app_state').upsert({ id: 1, data: this._stripSession(seeded), updated_at: new Date().toISOString() });
         return { ...seeded, currentUser: localSession };
@@ -457,12 +455,10 @@ const Storage = {
   },
 
   save(data) {
-    // Persiste sessão local separadamente
     this.saveSession(data && data.currentUser);
     const shared = this._stripSession(data);
     localStorage.setItem(this.KEY, JSON.stringify(shared));
     if (!SB) return;
-    // Coalesce múltiplos saves seguidos numa única upsert
     this._pending = shared;
     if (this._saving) return;
     this._saving = true;
@@ -528,9 +524,8 @@ const Storage = {
   }
 };
 
-/* DB e save() — DB é hidratado pelo init() async no fim do script */
 let DB = { usuarios: [], categorias: [], subcategorias: [], localizacoes: [], patrimonios: [], movimentacoes: [], inventarios: [], softwareTipos: [], _nextId: { patrimonios:1, movimentacoes:1, localizacoes:1, usuarios:1, inventarios:1, subcategorias:1 } };
-const save = () => Storage.save(DB);
+const save = () => BMStore.save(DB);
 const nextId = (col) => { DB._nextId[col] = (DB._nextId[col] || 1); const id = DB._nextId[col]++; save(); return id; };
 
 const $ = (sel, root=document) => root.querySelector(sel);
@@ -760,9 +755,8 @@ function bindTopbar() {
   $('#btn-refresh').addEventListener('click', () => {
     const btn = $('#btn-refresh');
     btn.classList.add('spinning');
-    /* recarrega DB do localStorage e re-renderiza */
-    DB = Storage.load();
-    setTimeout(() => { render(); toast('Atualizado', 'success'); }, 300);
+    /* recarrega DB do servidor e re-renderiza */
+    BMStore.load().then(d => { DB = d; render(); toast('Atualizado', 'success'); });
   });
   $('#btn-logout').addEventListener('click', () => {
     if (!confirm('Encerrar a sessão?')) return;
@@ -2370,4 +2364,26 @@ function openCadUser() {
       email: node.querySelector('#u-email').value.trim(),
       setor: node.querySelector('#u-setor').value.trim(),
       senha: node.querySelector('#u-senha').value,
-      perfil: node.querySelector('#u-
+      perfil: node.querySelector('#u-perfil').value
+    });
+    save(); node.remove(); toast('Usuário adicionado', 'success'); openCadUser();
+  });
+}
+
+/* ============== INIT ============== */
+(async () => {
+  const appEl = document.getElementById('app');
+  if (appEl) appEl.innerHTML = '<div style="padding:60px 20px;text-align:center;color:#1B2A5E;font-family:sans-serif;"><div style="font-size:32px;margin-bottom:16px;">⏳</div><div style="font-weight:700;">Carregando...</div></div>';
+  try { DB = await BMStore.load(); }
+  catch (e) { console.error('Erro ao carregar dados:', e); }
+  render();
+  BMStore.subscribe((newData) => {
+    if (!newData) return;
+    const myUserId = DB && DB.currentUser;
+    DB = { ...newData, currentUser: myUserId };
+    render();
+  });
+})();
+</script>
+</body>
+</html>
