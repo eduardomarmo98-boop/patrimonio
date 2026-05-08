@@ -177,8 +177,9 @@
   .badge.emprestado { background: #ddd6fe; color: #5b21b6; }
   .badge.baixado { background: #fee2e2; color: #991b1b; }
   .badge.extraviado { background: #fecaca; color: #7f1d1d; }
-  .badge.aguardando_aprovacao_cadastro { background: #e0e7ff; color: #3730a3; }
-  .badge.aguardando_aprovacao_baixa    { background: #fde68a; color: #92400e; }
+  .badge.aguardando_aprovacao_cadastro     { background: #e0e7ff; color: #3730a3; }
+  .badge.aguardando_aprovacao_movimentacao { background: #ffedd5; color: #9a3412; }
+  .badge.aguardando_aprovacao_baixa        { background: #fde68a; color: #92400e; }
   .badge.aguardando_aprovacao_extravio { background: #fde68a; color: #92400e; }
   .badge.cat-ti { background: var(--brand-navy-light); color: var(--brand-navy); }
   .badge.cat-obra { background: var(--brand-orange-light); color: var(--brand-orange-dark); }
@@ -565,10 +566,20 @@ const Perms = {
     if (u.perfil === 'admin_obras'&& categoriaId === 1) return true;
     return false;
   },
-  canRequestBaixa(u, categoriaId) {
-    if (Perms.canManageCategoria(u, categoriaId)) return true;
-    if (u && u.perfil === 'operador_ti' && (categoriaId === 2 || categoriaId === 3)) return true;
+  canRequestBaixa(u, categoriaId) { return Perms.canManageCategoria(u, categoriaId); },
+  canRequestMove(u, p) {
+    if (!u || !p) return false;
+    if (Perms.canManageCategoria(u, p.categoriaId)) return true;
+    if (u.perfil === 'operador_ti' && (p.categoriaId === 2 || p.categoriaId === 3)) return true;
+    if (u.perfil === 'operador' && p.responsavelAtualId === u.id) return true;
     return false;
+  },
+  movimentacoesPendentesParaAprovador(user) {
+    if (!user) return [];
+    return DB.patrimonios.filter(p =>
+      p.status === 'aguardando_aprovacao_movimentacao' &&
+      Perms.canApproveCadastro(user, p.categoriaId)  // mesma regra de aprovação
+    );
   },
   canApproveBaixa(u) { return Perms.isDiretoria(u); },
   allowedCategorias(u) {
@@ -619,7 +630,8 @@ const Lookup = {
     if (!u) return 0;
     return Lookup.pendingForUser(userId).length
          + Lookup.pendingCadastrosForApprover(u).length
-         + Lookup.pendingBaixasForDiretoria(u).length;
+         + Lookup.pendingBaixasForDiretoria(u).length
+         + Perms.movimentacoesPendentesParaAprovador(u).length;
   },
   canSee(user, p) {
     if (!user || !p) return false;
@@ -1003,8 +1015,9 @@ function renderList() {
         <option value="">Todos status</option>
         <option value="ativo"                            ${f.status==='ativo'?'selected':''}>Ativo</option>
         <option value="aguardando_aceite"                ${f.status==='aguardando_aceite'?'selected':''}>Aguard. aceite</option>
-        <option value="aguardando_aprovacao_cadastro"    ${f.status==='aguardando_aprovacao_cadastro'?'selected':''}>Aguard. aprovação cadastro</option>
-        <option value="aguardando_aprovacao_baixa"       ${f.status==='aguardando_aprovacao_baixa'?'selected':''}>Aguard. aprovação baixa</option>
+        <option value="aguardando_aprovacao_cadastro"      ${f.status==='aguardando_aprovacao_cadastro'?'selected':''}>Aguard. aprovação cadastro</option>
+        <option value="aguardando_aprovacao_movimentacao"  ${f.status==='aguardando_aprovacao_movimentacao'?'selected':''}>Aguard. aprovação movimentação</option>
+        <option value="aguardando_aprovacao_baixa"         ${f.status==='aguardando_aprovacao_baixa'?'selected':''}>Aguard. aprovação baixa</option>
         <option value="aguardando_aprovacao_extravio"    ${f.status==='aguardando_aprovacao_extravio'?'selected':''}>Aguard. aprovação extravio</option>
         <option value="manutencao"                       ${f.status==='manutencao'?'selected':''}>Manutenção</option>
         <option value="emprestado"         ${f.status==='emprestado'?'selected':''}>Emprestado</option>
@@ -1062,6 +1075,7 @@ function statusLabel(s) {
     ativo:'Ativo',
     aguardando_aceite:'Aguard. aceite',
     aguardando_aprovacao_cadastro:'Aguard. aprovação cadastro',
+    aguardando_aprovacao_movimentacao:'Aguard. aprovação movimentação',
     aguardando_aprovacao_baixa:'Aguard. aprovação baixa',
     aguardando_aprovacao_extravio:'Aguard. aprovação extravio',
     manutencao:'Manutenção',
@@ -1092,8 +1106,9 @@ function openDetail(patrimonioId) {
   const resp = Lookup.user(p.responsavelAtualId);
   const movs = Lookup.movs(p.id);
 
-  const podeManager = Perms.canManageCategoria(u, p.categoriaId)
-    || (u.perfil === 'operador_ti' && (p.categoriaId === 2 || p.categoriaId === 3));
+  const isAdminCat = Perms.canManageCategoria(u, p.categoriaId);
+  const podeManager = isAdminCat;
+  const podeMover = Perms.canRequestMove(u, p) && p.status !== 'aguardando_aprovacao_movimentacao' && p.status !== 'aguardando_aceite';
   const podeDeletar = Perms.canDelete(u);
   const aguardandoMeuAceite = (p.status === 'aguardando_aceite' && p.responsavelAtualId === u.id);
 
@@ -1159,16 +1174,36 @@ function openDetail(patrimonioId) {
             const tipo = p.status === 'aguardando_aprovacao_baixa' ? 'baixa' : 'extravio';
             return `<div class="lock-hint" style="margin-top:10px;"><span>⏳</span><span>${tipo === 'baixa' ? 'Baixa' : 'Extravio'} aguardando aprovação da Diretoria.</span></div>`;
           }
-          if (podeManager) {
-            return `
-              <div class="btn-row" style="margin-bottom:8px;">
-                <button class="btn" data-action="move">↗ Movimentar</button>
-                ${p.status !== 'manutencao' ? `<button class="btn warning" data-action="manut">🔧 Manutenção</button>` : `<button class="btn success" data-action="ret-manut">✓ Retornou</button>`}
-              </div>
+          // Movimentação aguardando aprovação do admin da categoria
+          if (p.status === 'aguardando_aprovacao_movimentacao') {
+            if (Perms.canApproveCadastro(u, p.categoriaId)) {
+              const dest = p.pendingMove || {};
+              const lTxt = dest.localizacaoAtualId ? (Lookup.loc(dest.localizacaoAtualId)||{}).nome : '—';
+              const rTxt = dest.responsavelAtualId ? (Lookup.user(dest.responsavelAtualId)||{}).nome : '—';
+              return `
+                <div class="accept-card" style="border-color:#9a3412; background:#ffedd5;">
+                  <div class="ac-title" style="color:#9a3412;">Movimentação aguardando sua aprovação</div>
+                  <div class="ac-meta" style="color:#9a3412;">Solicitada por ${escapeHtml((Lookup.user(p.solicitadoMovPor)||{}).nome || '—')}.<br>Local destino: <strong>${escapeHtml(lTxt)}</strong> · Responsável destino: <strong>${escapeHtml(rTxt)}</strong>${dest.motivo ? '<br>Motivo: '+escapeHtml(dest.motivo) : ''}</div>
+                  <div class="btn-row" style="margin-top:10px;">
+                    <button class="btn success" data-action="approve-move">✓ Aprovar movimentação</button>
+                    <button class="btn danger"  data-action="reject-move">✗ Rejeitar</button>
+                  </div>
+                </div>`;
+            }
+            return `<div class="lock-hint" style="margin-top:10px;"><span>⏳</span><span>Movimentação aguardando aprovação do administrador da categoria.</span></div>`;
+          }
+          // Botões de ação
+          if (podeMover || podeManager) {
+            const moveBtn  = podeMover  ? `<button class="btn" data-action="move">↗ Movimentar</button>` : '';
+            const manutBtn = podeManager ? (p.status !== 'manutencao' ? `<button class="btn warning" data-action="manut">🔧 Manutenção</button>` : `<button class="btn success" data-action="ret-manut">✓ Retornou</button>`) : '';
+            const baixaRow = podeManager ? `
               <div class="btn-row" style="margin-bottom:8px;">
                 <button class="btn outline-red" data-action="baixa">⬇ ${Perms.isDiretoria(u) ? 'Baixar' : 'Solicitar baixa'}</button>
                 <button class="btn secondary"   data-action="extraviado">⚠ ${Perms.isDiretoria(u) ? 'Extraviado' : 'Solicitar extravio'}</button>
-              </div>`;
+              </div>` : '';
+            return `
+              <div class="btn-row" style="margin-bottom:8px;">${moveBtn}${manutBtn}</div>
+              ${baixaRow}`;
           }
           return `<div class="lock-hint" style="margin-top:10px;"><span>🔒</span><span>Apenas o administrador da categoria pode movimentar este item.</span></div>`;
         })()}
@@ -1203,6 +1238,8 @@ function openDetail(patrimonioId) {
   if ($a('[data-action="reject-cad"]'))  $a('[data-action="reject-cad"]').addEventListener('click', () => { if(confirm('Rejeitar este cadastro? O item será removido.')){ rejectCadastro(p.id); node.remove(); }});
   if ($a('[data-action="approve-baixa"]')) $a('[data-action="approve-baixa"]').addEventListener('click', () => { approveBaixa(p.id); node.remove(); });
   if ($a('[data-action="reject-baixa"]'))  $a('[data-action="reject-baixa"]').addEventListener('click', () => { rejectBaixa(p.id); node.remove(); });
+  if ($a('[data-action="approve-move"]')) $a('[data-action="approve-move"]').addEventListener('click', () => { approveMove(p.id); node.remove(); });
+  if ($a('[data-action="reject-move"]'))  $a('[data-action="reject-move"]').addEventListener('click', () => { rejectMove(p.id); node.remove(); });
   if ($a('[data-action="delete"]')) $a('[data-action="delete"]').addEventListener('click', () => { if(confirm('Excluir definitivamente este patrimônio? Esta ação não pode ser desfeita.')){ deletePatrimonio(p.id); node.remove(); }});
 }
 
@@ -1215,6 +1252,9 @@ function renderTimelineEntry(m) {
     aprovacao_cadastro:'✓ Cadastro aprovado',
     transferencia_local:'Transferência de local',
     transferencia_resp:'Transferência de responsável',
+    transferencia_local_resp:'Transferência de local e responsável',
+    solicitacao_movimentacao:'Solicitação de movimentação',
+    rejeicao_movimentacao:'✗ Movimentação rejeitada',
     manutencao:'Enviado para manutenção',
     retorno_manutencao:'Retorno de manutenção',
     aceite_recebimento:'✓ Recebimento confirmado',
@@ -1245,7 +1285,8 @@ function renderTimelineEntry(m) {
 function openMove(patrimonioId) {
   const p = DB.patrimonios.find(x => x.id === patrimonioId);
   const u = Lookup.user(DB.currentUser);
-  if (!Perms.canManageCategoria(u, p.categoriaId)) return toast('Sem permissão para esta categoria', 'error');
+  if (!Perms.canRequestMove(u, p)) return toast('Sem permissão para esta categoria', 'error');
+  const isOpProprio = u.perfil === 'operador' && p.responsavelAtualId === u.id && !Perms.canManageCategoria(u, p.categoriaId);
 
   const html = `
     <div class="modal-backdrop" id="modal-move">
@@ -1256,7 +1297,7 @@ function openMove(patrimonioId) {
 
         <div class="lock-hint">
           <span>ℹ️</span>
-          <span>O destinatário precisará <strong>aceitar o recebimento</strong> para a movimentação ser efetivada.</span>
+          <span>${isOpProprio ? 'Sua solicitação será analisada pelo administrador. Após aprovação, o destinatário precisará <strong>aceitar o recebimento</strong>.' : 'O destinatário precisará <strong>aceitar o recebimento</strong> para a movimentação ser efetivada.'}</span>
         </div>
 
         <form id="move-form">
@@ -1302,6 +1343,27 @@ function openMove(patrimonioId) {
     if (!novoLocal && !novoResp) return toast('Escolha local ou responsável', 'error');
 
     const tipo = novoLocal && novoResp ? 'transferencia_local_resp' : (novoLocal ? 'transferencia_local' : 'transferencia_resp');
+    if (isOpProprio) {
+      // Operador OBRA: pede aprovação do ADM OBRA antes de aplicar
+      p.pendingMove = { localizacaoAtualId: novoLocal, responsavelAtualId: novoResp, motivo: motivo || '', tipo };
+      p.statusBeforePending = p.status;
+      p.status = 'aguardando_aprovacao_movimentacao';
+      p.solicitadoMovPor = u.id;
+      p.atualizadoEm = new Date().toISOString();
+      DB.movimentacoes.push({
+        id: nextId('movimentacoes'),
+        patrimonioId: p.id, tipo: 'solicitacao_movimentacao',
+        data: new Date().toISOString(),
+        usuarioId: u.id,
+        motivo: 'Solicitação de movimentação' + (motivo ? ' — ' + motivo : ''),
+        destinoLocalId: novoLocal, destinoRespId: novoResp
+      });
+      save();
+      node.remove();
+      toast('Solicitação enviada — aguardando aprovação do administrador', 'success');
+      render();
+      return;
+    }
     DB.movimentacoes.push({
       id: nextId('movimentacoes'),
       patrimonioId: p.id, tipo,
@@ -1435,6 +1497,53 @@ function rejectCadastro(patrimonioId) {
   DB.patrimonios = DB.patrimonios.filter(x => x.id !== p.id);
   DB.movimentacoes = DB.movimentacoes.filter(m => m.patrimonioId !== p.id);
   save(); toast('Cadastro rejeitado e removido', 'success'); render();
+}
+
+function approveMove(patrimonioId) {
+  const p = DB.patrimonios.find(x => x.id === patrimonioId);
+  const u = Lookup.user(DB.currentUser);
+  if (!p || p.status !== 'aguardando_aprovacao_movimentacao') return;
+  if (!Perms.canApproveCadastro(u, p.categoriaId)) return toast('Sem permissão para aprovar', 'error');
+  const m = p.pendingMove || {};
+  const novoLocal = m.localizacaoAtualId || null;
+  const novoResp  = m.responsavelAtualId || null;
+  if (novoLocal) p.localizacaoAtualId = novoLocal;
+  if (novoResp)  p.responsavelAtualId = novoResp;
+  p.status = 'aguardando_aceite';
+  p.aprovadoMovPor = u.id;
+  p.atualizadoEm = new Date().toISOString();
+  delete p.pendingMove;
+  delete p.statusBeforePending;
+  delete p.solicitadoMovPor;
+  DB.movimentacoes.push({
+    id: nextId('movimentacoes'), patrimonioId: p.id,
+    tipo: m.tipo || 'transferencia_local_resp', data: new Date().toISOString(),
+    usuarioId: u.id,
+    motivo: 'Movimentação aprovada' + (m.motivo ? ' — ' + m.motivo : ''),
+    destinoLocalId: novoLocal, destinoRespId: novoResp
+  });
+  save();
+  toast('Movimentação aprovada — aguardando aceite do destinatário', 'success');
+  render();
+}
+
+function rejectMove(patrimonioId) {
+  const p = DB.patrimonios.find(x => x.id === patrimonioId);
+  const u = Lookup.user(DB.currentUser);
+  if (!p || p.status !== 'aguardando_aprovacao_movimentacao') return;
+  if (!Perms.canApproveCadastro(u, p.categoriaId)) return toast('Sem permissão para rejeitar', 'error');
+  p.status = p.statusBeforePending || 'ativo';
+  delete p.pendingMove;
+  delete p.statusBeforePending;
+  const solId = p.solicitadoMovPor; delete p.solicitadoMovPor;
+  DB.movimentacoes.push({
+    id: nextId('movimentacoes'), patrimonioId: p.id,
+    tipo: 'rejeicao_movimentacao', data: new Date().toISOString(),
+    usuarioId: u.id, motivo: 'Movimentação rejeitada'
+  });
+  save();
+  toast('Movimentação rejeitada', 'success');
+  render();
 }
 
 /* ============== APROVAÇÕES DE BAIXA / EXTRAVIO ============== */
