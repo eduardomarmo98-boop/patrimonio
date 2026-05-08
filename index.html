@@ -548,7 +548,7 @@ function toast(msg, kind='') {
 const Perms = {
   isAdmin(u) { return u && (u.perfil === 'diretoria' || u.perfil === 'admin_ti' || u.perfil === 'admin_obras'); },
   isDiretoria(u) { return u && u.perfil === 'diretoria'; },
-  isOperador(u) { return u && u.perfil === 'operador'; },
+  isOperador(u) { return u && (u.perfil === 'operador' || u.perfil === 'operador_ti'); },
   canManageCategoria(u, categoriaId) {
     if (!u) return false;
     if (u.perfil === 'diretoria') return true;
@@ -565,13 +565,18 @@ const Perms = {
     if (u.perfil === 'admin_obras'&& categoriaId === 1) return true;
     return false;
   },
-  canRequestBaixa(u, categoriaId) { return Perms.canManageCategoria(u, categoriaId); },
+  canRequestBaixa(u, categoriaId) {
+    if (Perms.canManageCategoria(u, categoriaId)) return true;
+    if (u && u.perfil === 'operador_ti' && (categoriaId === 2 || categoriaId === 3)) return true;
+    return false;
+  },
   canApproveBaixa(u) { return Perms.isDiretoria(u); },
   allowedCategorias(u) {
     if (!u) return [];
     if (u.perfil === 'diretoria')  return DB.categorias;
     if (u.perfil === 'admin_ti')   return DB.categorias.filter(c => c.id === 2 || c.id === 3);
     if (u.perfil === 'admin_obras')return DB.categorias.filter(c => c.id === 1);
+    if (u.perfil === 'operador_ti')return DB.categorias.filter(c => c.id === 2 || c.id === 3);
     if (u.perfil === 'operador')   return DB.categorias;
     return [];
   },
@@ -580,7 +585,8 @@ const Perms = {
       diretoria:    'Diretoria',
       admin_ti:     'Adm. TI',
       admin_obras:  'Adm. Obras',
-      operador:     'Operador'
+      operador:     'Operador Obra',
+      operador_ti:  'Operador TI'
     })[perfil] || perfil;
   }
 };
@@ -620,6 +626,7 @@ const Lookup = {
     if (user.perfil === 'diretoria') return true;
     if (user.perfil === 'admin_ti')    return p.categoriaId === 2 || p.categoriaId === 3;
     if (user.perfil === 'admin_obras') return p.categoriaId === 1;
+    if (user.perfil === 'operador_ti') return p.categoriaId === 2 || p.categoriaId === 3;
     return p.responsavelAtualId === user.id || p.criadoPor === user.id;
   },
   visibleItems(user) {
@@ -736,7 +743,7 @@ function renderTopbar() {
   const pending = Lookup.pendingCount(u.id);
   return `
     <header class="topbar">
-      <div class="brand">
+      <div class="brand" id="brand-home" style="cursor:pointer;" title="Ir para a página inicial">
         <div class="name">BRANDÃO <span class="amp">&amp;</span> MARMO</div>
         <div class="tag">CONTROLE DE PATRIMÔNIO</div>
       </div>
@@ -752,6 +759,8 @@ function renderTopbar() {
   `;
 }
 function bindTopbar() {
+  const brandBtn = $('#brand-home');
+  if (brandBtn) brandBtn.addEventListener('click', () => { State.tab = 'home'; render(); });
   $('#btn-refresh').addEventListener('click', () => {
     const btn = $('#btn-refresh');
     btn.classList.add('spinning');
@@ -1083,7 +1092,8 @@ function openDetail(patrimonioId) {
   const resp = Lookup.user(p.responsavelAtualId);
   const movs = Lookup.movs(p.id);
 
-  const podeManager = Perms.canManageCategoria(u, p.categoriaId);
+  const podeManager = Perms.canManageCategoria(u, p.categoriaId)
+    || (u.perfil === 'operador_ti' && (p.categoriaId === 2 || p.categoriaId === 3));
   const podeDeletar = Perms.canDelete(u);
   const aguardandoMeuAceite = (p.status === 'aguardando_aceite' && p.responsavelAtualId === u.id);
 
@@ -1091,6 +1101,7 @@ function openDetail(patrimonioId) {
     <div class="modal-backdrop" id="modal-detail">
       <div class="modal" onclick="event.stopPropagation()">
         <button class="close-btn" data-close>&times;</button>
+        <button class="btn secondary" data-close style="width:auto;padding:6px 14px;font-size:13px;margin-bottom:12px;">← Voltar</button>
         <h2>${escapeHtml(p.descricao)}</h2>
         <div style="margin-bottom:12px;">
           <span class="codigo" style="font-family:monospace; color:var(--brand-orange); font-weight:700;">${escapeHtml(p.codigoBarras)}</span>
@@ -1179,12 +1190,12 @@ function openDetail(patrimonioId) {
   const node = wrap.firstElementChild;
   document.body.appendChild(node);
   node.addEventListener('click', e => { if (e.target === node) node.remove(); });
-  node.querySelector('[data-close]').addEventListener('click', () => node.remove());
+  node.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => node.remove()));
 
   const $a = (sel) => node.querySelector(sel);
   if ($a('[data-action="accept"]')) $a('[data-action="accept"]').addEventListener('click', () => { acceptReceipt(p.id); node.remove(); openDetail(p.id); });
   if ($a('[data-action="move"]'))   $a('[data-action="move"]').addEventListener('click', () => { node.remove(); openMove(p.id); });
-  if ($a('[data-action="manut"]'))  $a('[data-action="manut"]').addEventListener('click', () => { changeStatus(p.id, 'manutencao', 'Enviado para manutenção'); node.remove(); openDetail(p.id); });
+  if ($a('[data-action="manut"]'))  $a('[data-action="manut"]').addEventListener('click', () => { node.remove(); sendToMaintenance(p.id); });
   if ($a('[data-action="ret-manut"]')) $a('[data-action="ret-manut"]').addEventListener('click', () => { changeStatus(p.id, 'ativo', 'Retorno de manutenção', 'retorno_manutencao'); node.remove(); openDetail(p.id); });
   if ($a('[data-action="baixa"]'))  $a('[data-action="baixa"]').addEventListener('click', () => { requestBaixa(p.id, 'baixa'); node.remove(); });
   if ($a('[data-action="extraviado"]')) $a('[data-action="extraviado"]').addEventListener('click', () => { requestBaixa(p.id, 'extravio'); node.remove(); });
@@ -1332,7 +1343,9 @@ function acceptReceipt(patrimonioId) {
   if (p.status !== 'aguardando_aceite' || p.responsavelAtualId !== u.id) {
     return toast('Apenas o destinatário pode aceitar', 'error');
   }
-  p.status = 'ativo';
+  // Se havia status pendente (ex: aguardando aceite p/ envio à manutenção), aplica
+  if (p.pendingStatus) { p.status = p.pendingStatus; delete p.pendingStatus; }
+  else { p.status = 'ativo'; }
   p.atualizadoEm = new Date().toISOString();
   DB.movimentacoes.push({
     id: nextId('movimentacoes'), patrimonioId: p.id,
@@ -1342,6 +1355,57 @@ function acceptReceipt(patrimonioId) {
   save();
   toast('Recebimento confirmado', 'success');
   render();
+}
+
+/* Envia patrimônio para manutenção via aceite. Pede destinatário e marca status='aguardando_aceite'+pendingStatus='manutencao' */
+function sendToMaintenance(patrimonioId) {
+  const p = DB.patrimonios.find(x => x.id === patrimonioId);
+  const u = Lookup.user(DB.currentUser);
+  if (!p) return;
+  // Constrói lista de candidatos a recebedor (todos os usuários ativos)
+  const opts = DB.usuarios.map(x => `<option value="${x.id}" ${x.id===p.responsavelAtualId?'selected':''}>${escapeHtml(x.nome)} (${escapeHtml(x.setor||'—')})</option>`).join('');
+  const html = `
+    <div class="modal-backdrop" id="modal-mnt">
+      <div class="modal" onclick="event.stopPropagation()">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border);">
+          <button class="btn secondary" data-close style="width:auto;padding:6px 14px;font-size:13px;">← Voltar</button>
+          <h2 style="margin:0;font-size:18px;">Enviar para manutenção</h2>
+        </div>
+        <div class="form-group">
+          <label>Responsável da manutenção *</label>
+          <select id="mnt-resp" required>${opts}</select>
+          <div class="form-help">Esta pessoa precisará confirmar o recebimento para o status virar "Manutenção".</div>
+        </div>
+        <div class="form-group">
+          <label>Motivo / observações</label>
+          <textarea id="mnt-motivo" rows="2" placeholder="Ex.: Tela com defeito"></textarea>
+        </div>
+        <button class="btn warning" id="mnt-confirm">🔧 Enviar para manutenção</button>
+      </div>
+    </div>`;
+  const wrap = document.createElement('div'); wrap.innerHTML = html;
+  const node = wrap.firstElementChild; document.body.appendChild(node);
+  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  node.querySelector('[data-close]').addEventListener('click', () => node.remove());
+  node.querySelector('#mnt-confirm').addEventListener('click', () => {
+    const respId = parseInt(node.querySelector('#mnt-resp').value);
+    const motivo = node.querySelector('#mnt-motivo').value.trim();
+    if (!respId) return toast('Selecione o responsável', 'error');
+    p.responsavelAtualId = respId;
+    p.status = 'aguardando_aceite';
+    p.pendingStatus = 'manutencao';
+    p.atualizadoEm = new Date().toISOString();
+    DB.movimentacoes.push({
+      id: nextId('movimentacoes'), patrimonioId: p.id,
+      tipo: 'manutencao', data: new Date().toISOString(),
+      usuarioId: u.id, motivo: 'Enviado para manutenção' + (motivo ? ' — ' + motivo : ''),
+      destinoRespId: respId
+    });
+    save();
+    node.remove();
+    toast('Aguardando aceite do responsável da manutenção', 'success');
+    openDetail(patrimonioId);
+  });
 }
 
 /* ============== APROVAÇÕES DE CADASTRO ============== */
@@ -1533,6 +1597,10 @@ function renderCreate() {
           <label>Responsável *</label>
           <input type="text" id="sw-resp" required placeholder="Nome do responsável">
         </div>
+        <div class="form-group">
+          <label>Equipamento *</label>
+          <input type="text" id="sw-equipamento" required placeholder="Nome do equipamento que usa a licença">
+        </div>
         <div class="filter-row">
           <div class="form-group" style="flex:1">
             <label>Valor de Aquisição (R$)</label>
@@ -1605,6 +1673,7 @@ function bindCreate() {
     if (fsw)  fsw.style.display  = isSoft ? 'block' : 'none';
     if ($('#sw-chave'))  $('#sw-chave').required  = isSoft;
     if ($('#sw-resp'))   $('#sw-resp').required   = isSoft;
+    if ($('#sw-equipamento')) $('#sw-equipamento').required = isSoft;
     if ($('#sw-subcat')) $('#sw-subcat').required = isSoft;
     if ($('#c-desc'))    $('#c-desc').required    = !isSoft;
     if ($('#c-loc'))     $('#c-loc').required     = !isSoft;
@@ -1647,10 +1716,12 @@ function bindCreate() {
     if (catId === 3) {
       const chave = $('#sw-chave')  ? $('#sw-chave').value.trim()  : '';
       const resp  = $('#sw-resp')   ? $('#sw-resp').value.trim()   : '';
+      const equip = $('#sw-equipamento') ? $('#sw-equipamento').value.trim() : '';
       const swSubcatId = $('#sw-subcat') ? (parseInt($('#sw-subcat').value)||null) : null;
       if (!swSubcatId) return toast('Selecione a subcategoria', 'error');
       if (!chave)      return toast('Informe o número da licença', 'error');
       if (!resp)       return toast('Informe o responsável', 'error');
+      if (!equip)      return toast('Informe o equipamento', 'error');
       const subcatObj = (DB.subcategorias||[]).find(s => s.id === swSubcatId);
       const subcatNome = subcatObj ? subcatObj.nome : 'Licença';
       const descricao  = subcatNome + ' — ' + chave;
@@ -1662,6 +1733,7 @@ function bindCreate() {
         licencaChave: chave,
         licencaValidade: $('#sw-validade') ? $('#sw-validade').value || null : null,
         licencaResponsavel: resp,
+        licencaEquipamento: equip,
         valorAquisicao: parseFloat($('#sw-valor') ? $('#sw-valor').value : '0') || 0,
         dataAquisicao: $('#sw-data') ? $('#sw-data').value || null : null,
         dataRegistro:  $('#sw-data-registro') ? $('#sw-data-registro').value || null : null,
@@ -2169,7 +2241,9 @@ function exportCSV() {
 function openCadSubcat() {
   const u = Lookup.user(DB.currentUser);
   if (!Perms.isAdmin(u)) return toast('Apenas admins', 'error');
-  const cats = DB.categorias;
+  // ADM só vê subcategorias das categorias que pode gerenciar
+  const cats = DB.categorias.filter(c => Perms.canManageCategoria(u, c.id));
+  if (cats.length === 0) return toast('Sem permissão para gerenciar subcategorias', 'error');
   const html2 = `
     <div class="modal-backdrop" id="modal-sc">
       <div class="modal" onclick="event.stopPropagation()">
@@ -2251,7 +2325,7 @@ function openCadLoc() {
           ${DB.localizacoes.map(l => {
           const tipoIcon = l.tipo==='obra'?'🏗️':l.tipo==='escritorio'?'🏢':l.tipo==='deposito'?'📦':'📍';
           const tipoLabel = l.tipo==='obra'?'Obra':l.tipo==='escritorio'?'Escritório':l.tipo==='deposito'?'Depósito':l.tipo;
-          return `<div class="item"><div class="item-icon">${tipoIcon}</div><div class="item-info"><div class="title">${escapeHtml(l.nome)}</div><div class="subtitle">${tipoLabel}</div></div></div>`;
+          return `<div class="item" style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><div style="display:flex;gap:10px;align-items:center;flex:1;"><div class="item-icon">${tipoIcon}</div><div class="item-info"><div class="title">${escapeHtml(l.nome)}</div><div class="subtitle">${tipoLabel}</div></div></div><button class="btn secondary loc-del" data-loc-id="${l.id}" title="Excluir" style="width:auto;padding:4px 10px;font-size:13px;color:var(--danger);border-color:var(--danger);">🗑️</button></div>`;
         }).join('')}
         </div>
         <form id="loc-form">
@@ -2277,6 +2351,21 @@ function openCadLoc() {
     DB.localizacoes.push({ id: nextId('localizacoes'), nome: node.querySelector('#l-nome').value.trim(), tipo: node.querySelector('#l-tipo').value, parent: null });
     save(); node.remove(); toast('Localização adicionada', 'success'); openCadLoc();
   });
+  // Excluir localização
+  node.querySelectorAll('.loc-del').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const lid = parseInt(btn.dataset.locId);
+      const loc = (DB.localizacoes||[]).find(x => x.id === lid);
+      if (!loc) return;
+      const emUso = (DB.patrimonios||[]).filter(p => p.localizacaoAtualId === lid).length;
+      if (emUso > 0) return toast(`Não é possível excluir: ${emUso} patrimônio(s) estão em "${loc.nome}".`, 'error');
+      const filhos = (DB.localizacoes||[]).filter(x => x.parent === lid).length;
+      if (filhos > 0) return toast(`Não é possível excluir: existem ${filhos} sublocal(is) dentro de "${loc.nome}".`, 'error');
+      if (!confirm(`Excluir a localização "${loc.nome}"?`)) return;
+      DB.localizacoes = DB.localizacoes.filter(x => x.id !== lid);
+      save(); node.remove(); toast('Localização excluída', 'success'); openCadLoc();
+    });
+  });
 }
 
 function openCadUser() {
@@ -2285,9 +2374,9 @@ function openCadUser() {
 
   // Perfis que o usuário atual pode criar
   const perfisDisp =
-    u.perfil === 'diretoria'   ? [['operador','Operador'],['admin_ti','Administrador TI'],['admin_obras','Administrador Obras'],['diretoria','Diretoria']] :
-    u.perfil === 'admin_ti'    ? [['operador','Operador']] :
-    u.perfil === 'admin_obras' ? [['operador','Operador']] : [];
+    u.perfil === 'diretoria'   ? [['operador','Operador Obra'],['operador_ti','Operador TI'],['admin_ti','Administrador TI'],['admin_obras','Administrador Obras'],['diretoria','Diretoria']] :
+    u.perfil === 'admin_ti'    ? [['operador_ti','Operador TI']] :
+    u.perfil === 'admin_obras' ? [['operador','Operador Obra']] : [];
 
   const podeRemover = (alvo) => {
     if (alvo.id === u.id) return false; // não pode se remover
@@ -2447,8 +2536,8 @@ const CSV_TEMPLATES = {
     sample: ['BM-TI-0001','Notebook Dell','Computadores/Notebooks','Dell','Latitude 5430','SN-001','NF-5678','2026-02-15','5800','Sede Administrativa','ti@brandaomarmo.com','']
   },
   3: { // TI - Softwares
-    headers: ['subcategoria','licencaChave','licencaValidade','licencaResponsavel','dataAquisicao','valorAquisicao','dataRegistro','observacoes'],
-    sample: ['Suite Office','XXXXX-XXXXX-XXXXX-XXXXX','2027-12-31','João da Silva','2026-01-15','450','2026-01-20','']
+    headers: ['subcategoria','licencaChave','licencaValidade','licencaResponsavel','licencaEquipamento','dataAquisicao','valorAquisicao','dataRegistro','observacoes'],
+    sample: ['Suite Office','XXXXX-XXXXX-XXXXX-XXXXX','2027-12-31','João da Silva','PC do João','2026-01-15','450','2026-01-20','']
   }
 };
 
@@ -2555,6 +2644,7 @@ function openImportCsv() {
             licencaChave: chave,
             licencaValidade: get('licencaValidade') || null,
             licencaResponsavel: get('licencaResponsavel'),
+            licencaEquipamento: get('licencaEquipamento'),
             valorAquisicao: parseFloat(get('valorAquisicao')) || 0,
             dataAquisicao: get('dataAquisicao') || null,
             dataRegistro: get('dataRegistro') || null,
