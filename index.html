@@ -1837,6 +1837,7 @@ function renderMore() {
           <button class="quick-action" data-action="cad-loc"><span class="qa-icon">📍</span>Localizações</button>
           <button class="quick-action" data-action="cad-user"><span class="qa-icon">👥</span>Usuários</button>
           <button class="quick-action" data-action="cad-subcat"><span class="qa-icon">🏷️</span>Subcategorias</button>
+          <button class="quick-action" data-action="import-csv"><span class="qa-icon">📥</span>Importar CSV</button>
         </div>
       </div>
     ` : ''}
@@ -1887,6 +1888,7 @@ function bindMore() {
   $$('[data-action="cad-loc"]').forEach(b => b.addEventListener('click', openCadLoc));
   $$('[data-action="cad-user"]').forEach(b => b.addEventListener('click', openCadUser));
   $$('[data-action="cad-subcat"]').forEach(b => b.addEventListener('click', openCadSubcat));
+  $$('[data-action="import-csv"]').forEach(b => b.addEventListener('click', openImportCsv));
   $$('[data-action="cad-sw"]').forEach(b => b.addEventListener('click', () => { State.tab='create'; render(); setTimeout(()=>{ const s=$('#c-cat'); if(s){s.value='3'; s.dispatchEvent(new Event('change')); const sw=$('#software-fields'); if(sw) sw.style.display='block'; } },100); }));
   $$('[data-action="save-whatsapp"]').forEach(b => b.addEventListener('click', () => {
     const phone  = $('#wa-phone')  ? $('#wa-phone').value.trim()  : '';
@@ -2367,6 +2369,242 @@ function openCadUser() {
       perfil: node.querySelector('#u-perfil').value
     });
     save(); node.remove(); toast('Usuário adicionado', 'success'); openCadUser();
+  });
+}
+
+
+/* ============== IMPORTAÇÃO CSV ============== */
+function parseCSV(text) {
+  // Parser CSV simples com suporte a aspas e vírgulas dentro de campos.
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i], next = text[i+1];
+    if (inQuotes) {
+      if (c === '"' && next === '"') { field += '"'; i++; }
+      else if (c === '"') inQuotes = false;
+      else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',' || c === ';') { row.push(field); field = ''; }
+      else if (c === '\r') { /* skip */ }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(v => (v||'').trim() !== ''));
+}
+
+function csvEscape(v) {
+  if (v == null) return '';
+  const s = String(v);
+  if (/[",;\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function downloadCsv(filename, rows) {
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const CSV_TEMPLATES = {
+  1: { // Obra
+    headers: ['codigoBarras','descricao','subcategoria','marca','modelo','numeroSerie','notaFiscal','dataAquisicao','valorAquisicao','localizacao','responsavelEmail','observacoes'],
+    sample: ['BM-OB-0001','Furadeira Bosch','Ferramentas Manuais','Bosch','GSB 13 RE','BSH-001','NF-1234','2026-01-10','850','Sede Administrativa','obras@brandaomarmo.com','']
+  },
+  2: { // TI - Equipamentos
+    headers: ['codigoBarras','descricao','subcategoria','marca','modelo','numeroSerie','notaFiscal','dataAquisicao','valorAquisicao','localizacao','responsavelEmail','observacoes'],
+    sample: ['BM-TI-0001','Notebook Dell','Computadores/Notebooks','Dell','Latitude 5430','SN-001','NF-5678','2026-02-15','5800','Sede Administrativa','ti@brandaomarmo.com','']
+  },
+  3: { // TI - Softwares
+    headers: ['subcategoria','licencaChave','licencaValidade','licencaResponsavel','dataAquisicao','valorAquisicao','dataRegistro','observacoes'],
+    sample: ['Suite Office','XXXXX-XXXXX-XXXXX-XXXXX','2027-12-31','João da Silva','2026-01-15','450','2026-01-20','']
+  }
+};
+
+function openImportCsv() {
+  const u = Lookup.user(DB.currentUser);
+  if (!Perms.isAdmin(u)) return toast('Apenas administradores podem importar', 'error');
+
+  const html = `
+    <div class="modal-backdrop" id="modal-csv">
+      <div class="modal" onclick="event.stopPropagation()">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border);">
+          <button class="btn secondary" data-close style="width:auto;padding:6px 14px;font-size:13px;">← Voltar</button>
+          <h2 style="margin:0;font-size:18px;">Importar CSV</h2>
+        </div>
+        <div class="form-group">
+          <label>Categoria</label>
+          <select id="csv-cat">
+            ${DB.categorias.map(c => `<option value="${c.id}">${c.icone} ${escapeHtml(c.nome)}</option>`).join('')}
+          </select>
+        </div>
+        <div style="background:#f9fafb;border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;">
+          <div style="font-weight:700;margin-bottom:6px;">Como funciona</div>
+          <div style="color:var(--muted);line-height:1.5;">
+            1. Baixe o modelo da categoria escolhida.<br>
+            2. Preencha no Excel/Sheets e salve como <strong>CSV (separado por vírgula)</strong>.<br>
+            3. Carregue o arquivo aqui. Códigos já existentes serão <strong>sobrescritos</strong>.
+          </div>
+        </div>
+        <button class="btn secondary" id="csv-template" style="margin-bottom:12px;">📄 Baixar modelo CSV</button>
+        <div class="form-group">
+          <label>Arquivo CSV</label>
+          <input type="file" id="csv-file" accept=".csv,text/csv">
+        </div>
+        <div id="csv-preview" style="font-size:12px;color:var(--muted);margin-bottom:12px;"></div>
+        <button class="btn" id="csv-import">📥 Importar</button>
+      </div>
+    </div>`;
+  const wrap = document.createElement('div'); wrap.innerHTML = html;
+  const node = wrap.firstElementChild; document.body.appendChild(node);
+  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  node.querySelector('[data-close]').addEventListener('click', () => node.remove());
+
+  // Baixar modelo
+  node.querySelector('#csv-template').addEventListener('click', () => {
+    const catId = parseInt(node.querySelector('#csv-cat').value);
+    const tpl = CSV_TEMPLATES[catId]; if (!tpl) return;
+    const cat = Lookup.cat(catId);
+    downloadCsv(`modelo-${cat.nome.replace(/[^a-z0-9]+/gi,'_').toLowerCase()}.csv`, [tpl.headers, tpl.sample]);
+  });
+
+  // Preview do arquivo
+  let parsedRows = null;
+  node.querySelector('#csv-file').addEventListener('change', (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        parsedRows = parseCSV(ev.target.result.replace(/^\uFEFF/,''));
+        const total = parsedRows.length - 1;
+        node.querySelector('#csv-preview').innerHTML = total > 0
+          ? `<div style="color:var(--success);">✓ ${total} linha(s) lida(s). Cabeçalho: <code>${parsedRows[0].slice(0,5).join(', ')}…</code></div>`
+          : `<div style="color:var(--danger);">Arquivo vazio ou sem dados.</div>`;
+      } catch (err) {
+        parsedRows = null;
+        node.querySelector('#csv-preview').innerHTML = `<div style="color:var(--danger);">Erro ao ler: ${escapeHtml(err.message)}</div>`;
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+  });
+
+  // Importar
+  node.querySelector('#csv-import').addEventListener('click', () => {
+    if (!parsedRows || parsedRows.length < 2) return toast('Selecione um CSV com dados', 'error');
+    const catId = parseInt(node.querySelector('#csv-cat').value);
+    const tpl = CSV_TEMPLATES[catId]; if (!tpl) return;
+    const headers = parsedRows[0].map(h => h.trim());
+    const required = tpl.headers;
+    const missing = required.filter(h => !headers.includes(h));
+    if (missing.length) return toast(`Colunas faltando: ${missing.join(', ')}`, 'error');
+
+    let criados = 0, atualizados = 0, erros = [];
+    const idx = (h) => headers.indexOf(h);
+
+    for (let i = 1; i < parsedRows.length; i++) {
+      const row = parsedRows[i];
+      const get = (h) => (row[idx(h)] || '').trim();
+      try {
+        if (catId === 3) {
+          // SOFTWARE
+          const subNome = get('subcategoria');
+          let sub = (DB.subcategorias||[]).find(x => x.categoriaId === 3 && x.nome.toLowerCase() === subNome.toLowerCase());
+          if (!sub) {
+            sub = { id: nextId('subcategorias'), nome: subNome || 'Outros', categoriaId: 3 };
+            DB.subcategorias.push(sub);
+          }
+          const chave = get('licencaChave');
+          if (!chave) { erros.push(`L${i+1}: licencaChave vazio`); continue; }
+          const codigo = 'BM-SW-' + String(DB._nextId.patrimonios).padStart(4,'0');
+          const desc = sub.nome + ' — ' + chave;
+          const novo = {
+            id: nextId('patrimonios'), codigoBarras: codigo,
+            categoriaId: 3, subcategoriaId: sub.id,
+            descricao: desc, tipoSoftware: sub.nome,
+            licencaChave: chave,
+            licencaValidade: get('licencaValidade') || null,
+            licencaResponsavel: get('licencaResponsavel'),
+            valorAquisicao: parseFloat(get('valorAquisicao')) || 0,
+            dataAquisicao: get('dataAquisicao') || null,
+            dataRegistro: get('dataRegistro') || null,
+            observacoes: get('observacoes'),
+            status: 'ativo', criadoPor: u.id, criadoEm: new Date().toISOString(),
+            localizacaoAtualId: null, responsavelAtualId: u.id
+          };
+          DB.patrimonios.push(novo);
+          DB.movimentacoes.push({ id: nextId('movimentacoes'), patrimonioId: novo.id,
+            tipo: 'cadastro', data: new Date().toISOString(), usuarioId: u.id, motivo: 'Importação CSV' });
+          criados++;
+        } else {
+          // HARDWARE (Obra ou TI - Equipamentos)
+          const codigo = get('codigoBarras');
+          if (!codigo) { erros.push(`L${i+1}: codigoBarras vazio`); continue; }
+          const desc = get('descricao');
+          if (!desc) { erros.push(`L${i+1}: descricao vazia`); continue; }
+          const subNome = get('subcategoria');
+          let sub = (DB.subcategorias||[]).find(x => x.categoriaId === catId && x.nome.toLowerCase() === subNome.toLowerCase());
+          if (!sub && subNome) {
+            sub = { id: nextId('subcategorias'), nome: subNome, categoriaId: catId };
+            DB.subcategorias.push(sub);
+          }
+          const locNome = get('localizacao');
+          let loc = (DB.localizacoes||[]).find(x => x.nome.toLowerCase() === locNome.toLowerCase());
+          if (!loc && locNome) {
+            loc = { id: nextId('localizacoes'), nome: locNome, tipo: 'unidade', parent: null };
+            DB.localizacoes.push(loc);
+          }
+          const respEmail = get('responsavelEmail').toLowerCase();
+          let resp = DB.usuarios.find(x => x.email.toLowerCase() === respEmail);
+          if (!resp) resp = u; // default ao admin que importa
+
+          const existing = DB.patrimonios.find(p => p.codigoBarras.toLowerCase() === codigo.toLowerCase());
+          const dados = {
+            codigoBarras: codigo,
+            descricao: desc,
+            categoriaId: catId,
+            subcategoriaId: sub ? sub.id : null,
+            marca: get('marca'),
+            modelo: get('modelo'),
+            numeroSerie: get('numeroSerie'),
+            notaFiscal: get('notaFiscal'),
+            dataAquisicao: get('dataAquisicao') || null,
+            valorAquisicao: parseFloat(get('valorAquisicao')) || 0,
+            localizacaoAtualId: loc ? loc.id : null,
+            responsavelAtualId: resp.id,
+            observacoes: get('observacoes')
+          };
+          if (existing) {
+            Object.assign(existing, dados);
+            atualizados++;
+            DB.movimentacoes.push({ id: nextId('movimentacoes'), patrimonioId: existing.id,
+              tipo: 'edicao', data: new Date().toISOString(), usuarioId: u.id, motivo: 'Atualizado via importação CSV' });
+          } else {
+            const novo = { id: nextId('patrimonios'), ...dados,
+              status: 'ativo', criadoPor: u.id, criadoEm: new Date().toISOString() };
+            DB.patrimonios.push(novo);
+            DB.movimentacoes.push({ id: nextId('movimentacoes'), patrimonioId: novo.id,
+              tipo: 'cadastro', data: new Date().toISOString(), usuarioId: u.id, motivo: 'Importação CSV' });
+            criados++;
+          }
+        }
+      } catch (err) {
+        erros.push(`L${i+1}: ${err.message}`);
+      }
+    }
+    save();
+    let msg = `${criados} criado(s), ${atualizados} atualizado(s)`;
+    if (erros.length) msg += `, ${erros.length} erro(s)`;
+    toast(msg, erros.length ? 'error' : 'success');
+    if (erros.length) console.warn('Erros de importação:', erros);
+    node.remove();
+    render();
   });
 }
 
