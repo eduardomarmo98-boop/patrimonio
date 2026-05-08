@@ -2316,7 +2316,10 @@ function openCadUser() {
                   <div class="subtitle">${escapeHtml(x.email)} · <span class="role-chip ${x.perfil}">${Perms.perfilLabel(x.perfil)}</span></div>
                   ${temBens ? `<div style="font-size:11px; color:var(--warning); margin-top:2px;">🔒 Possui bens sob custódia</div>` : ''}
                 </div>
-                ${remov ? `<button class="btn danger" data-del="${x.id}" style="width:auto; padding:6px 10px; font-size:12px;">Excluir</button>` : ''}
+                <div style="display:flex;gap:6px;flex-shrink:0;">
+                  <button class="btn secondary" data-pw="${x.id}" style="width:auto; padding:6px 10px; font-size:12px;" title="Trocar senha">🔑</button>
+                  ${remov ? `<button class="btn danger" data-del="${x.id}" style="width:auto; padding:6px 10px; font-size:12px;">Excluir</button>` : ''}
+                </div>
               </div>
             `;
           }).join('')}
@@ -2352,6 +2355,27 @@ function openCadUser() {
     if (!confirm(`Excluir o usuário ${target.nome}?`)) return;
     DB.usuarios = DB.usuarios.filter(x => x.id !== targetId);
     save(); node.remove(); toast('Usuário excluído', 'success'); openCadUser();
+  }));
+
+  // Trocar senha
+  node.querySelectorAll('[data-pw]').forEach(b => b.addEventListener('click', () => {
+    const targetId = parseInt(b.dataset.pw);
+    const target = Lookup.user(targetId);
+    if (!target) return;
+    // Permissão: a própria pessoa, OU diretoria, OU admin trocando senha de operador
+    const isSelf = target.id === u.id;
+    const isDir  = u.perfil === 'diretoria';
+    const isAdminOp = (u.perfil === 'admin_ti' || u.perfil === 'admin_obras') && target.perfil === 'operador';
+    if (!isSelf && !isDir && !isAdminOp) {
+      return toast('Sem permissão para trocar a senha deste usuário', 'error');
+    }
+    const nova = prompt(`Nova senha para ${target.nome}:`, '');
+    if (nova == null) return;
+    const senha = nova.trim();
+    if (senha.length < 6) return toast('Senha precisa ter ao menos 6 caracteres', 'error');
+    target.senha = senha;
+    save();
+    toast('Senha atualizada', 'success');
   }));
 
   node.querySelector('#user-form').addEventListener('submit', e => {
