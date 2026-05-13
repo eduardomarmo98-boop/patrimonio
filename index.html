@@ -1759,8 +1759,13 @@ function renderCreate() {
         </div>
         <div class="form-group">
           <label>Registro fotográfico *</label>
-          <input type="file" id="c-foto" accept="image/*" capture="environment" required>
-          <div class="form-help">Tire ou anexe uma foto do equipamento.</div>
+          <input type="file" id="c-foto" accept="image/*" capture="environment" style="display:none;">
+          <input type="file" id="c-foto-galeria" accept="image/*" style="display:none;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="btn secondary" id="btn-tirar-foto" style="width:auto;flex:1;min-width:140px;">📷 Tirar foto</button>
+            <button type="button" class="btn secondary" id="btn-escolher-foto" style="width:auto;flex:1;min-width:140px;">🖼️ Escolher arquivo</button>
+          </div>
+          <div class="form-help">Tire uma foto agora ou escolha um arquivo existente.</div>
           <div id="c-foto-preview" style="margin-top:8px;"></div>
         </div>
         <div class="form-group">
@@ -1781,18 +1786,31 @@ function bindCreate() {
   const scanBtn = $('#c-scan');
   if (scanBtn) scanBtn.addEventListener('click', () => openScanner((code) => { $('#c-codigo').value = code; }));
 
-  // Preview e validação da foto
-  const fotoInput = $('#c-foto');
-  if (fotoInput) {
-    fotoInput.addEventListener('change', (ev) => {
-      const f = ev.target.files[0];
-      const preview = $('#c-foto-preview');
-      if (!f || !preview) return;
-      if (!f.type.startsWith('image/')) { preview.innerHTML = '<div style="color:var(--danger);font-size:12px;">Apenas imagens.</div>'; return; }
-      const url = URL.createObjectURL(f);
-      preview.innerHTML = `<img src="${url}" style="max-width:160px;max-height:160px;border-radius:8px;border:1px solid var(--border);">`;
-    });
-  }
+  // Botões de foto: tirar (camera) ou galeria
+  const btnTirar = $('#btn-tirar-foto');
+  const btnEscolher = $('#btn-escolher-foto');
+  const inpFoto = $('#c-foto');
+  const inpGal  = $('#c-foto-galeria');
+  if (btnTirar && inpFoto) btnTirar.addEventListener('click', () => inpFoto.click());
+  if (btnEscolher && inpGal) btnEscolher.addEventListener('click', () => inpGal.click());
+  // Preview e copia da seleção da galeria para o input principal
+  const previewFoto = (file) => {
+    const preview = $('#c-foto-preview');
+    if (!file || !preview) return;
+    if (!file.type.startsWith('image/')) { preview.innerHTML = '<div style="color:var(--danger);font-size:12px;">Apenas imagens.</div>'; return; }
+    const url = URL.createObjectURL(file);
+    preview.innerHTML = `<img src="${url}" style="max-width:200px;max-height:200px;border-radius:8px;border:1px solid var(--border);">`;
+  };
+  if (inpFoto) inpFoto.addEventListener('change', e => previewFoto(e.target.files[0]));
+  if (inpGal)  inpGal.addEventListener('change',  e => {
+    // Move o arquivo para inpFoto para o submit lê-lo dali
+    if (inpGal.files[0]) {
+      const dt = new DataTransfer();
+      dt.items.add(inpGal.files[0]);
+      inpFoto.files = dt.files;
+      previewFoto(inpGal.files[0]);
+    }
+  });
 
   // Toggle campos software
   const catSel = $('#c-cat');
