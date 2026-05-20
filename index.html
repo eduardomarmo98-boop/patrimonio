@@ -790,6 +790,9 @@ function bindLogin() {
     if (btn) { btn.disabled = true; btn.dataset._t = btn.textContent; btn.textContent = 'Entrando...'; }
     try {
       const authUser = await Auth.signIn(email, senha);
+      // Para perfis admin, exige 2FA antes de prosseguir
+      const mfaOk = await ensureMfaForAdmins(authUser);
+      if (!mfaOk) { await Auth.signOut(); return toast('2FA cancelado. Acesso negado.', 'error'); }
       // Antes do login a RLS bloqueava leitura — agora puxa o estado real.
       try { DB = await BMStore.load(); } catch (e) { console.warn('[load pós-login]:', e.message); }
       const id = await syncCurrentUserFromAuth(authUser);
@@ -810,6 +813,82 @@ function bindLogin() {
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = btn.dataset._t || 'Entrar'; }
     }
+  });
+}
+
+/* ===== MFA (TOTP) para perfis administrativos ===== */
+const ADMIN_PERFIS = ['diretoria','admin_ti','admin_obras'];
+
+async function ensureMfaForAdmins(authUser) {
+  if (!SB || !authUser) return true;
+  const profile = await Auth.fetchProfile(authUser.id);
+  if (!profile || !ADMIN_PERFIS.includes(profile.perfil)) return true;
+  const { data: aal } = await SB.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (aal && aal.currentLevel === 'aal2') return true;
+  const { data: factors, error: fe } = await SB.auth.mfa.listFactors();
+  if (fe) { toast('Erro MFA: ' + fe.message, 'error'); return false; }
+  const totp = (factors.totp || []).find(f => f.status === 'verified');
+  if (totp) return await mfaChallenge(totp.id);
+  return await mfaEnroll();
+}
+
+function mfaModal(innerHtml) {
+  const m = document.createElement('div');
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px;';
+  m.innerHTML = '<div style="background:white;border-radius:12px;padding:24px;max-width:380px;width:100%;text-align:center;">' + innerHtml + '</div>';
+  document.body.appendChild(m);
+  return m;
+}
+
+async function mfaEnroll() {
+  const { data, error } = await SB.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Patrimônio ' + Date.now() });
+  if (error) { toast('Erro MFA enroll: ' + error.message, 'error'); return false; }
+  const factorId = data.id;
+  return new Promise(resolve => {
+    const m = mfaModal(`
+      <h2 style="color:#1B2A5E;margin:0 0 10px;font-size:18px;">Ativar 2FA</h2>
+      <p style="font-size:12px;color:#6b7280;margin-bottom:14px;">Escaneie o QR no Google Authenticator/Authy e digite o código de 6 dígitos.</p>
+      <div style="background:white;padding:6px;margin-bottom:10px;">${data.totp.qr_code}</div>
+      <p style="font-size:10px;color:#6b7280;margin-bottom:4px;">Ou digite manualmente:</p>
+      <code style="display:block;background:#f4f4f5;padding:6px;border-radius:4px;font-size:11px;word-break:break-all;margin-bottom:12px;">${data.totp.secret}</code>
+      <input id="mfa-code" placeholder="000000" maxlength="6" inputmode="numeric" style="font-size:22px;text-align:center;padding:8px;width:140px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:12px;">
+      <div style="display:flex;gap:8px;justify-content:center;">
+        <button id="mfa-cancel" class="btn secondary" style="width:auto;padding:8px 14px;">Cancelar</button>
+        <button id="mfa-ok" class="btn" style="width:auto;padding:8px 14px;">Confirmar</button>
+      </div>
+    `);
+    m.querySelector('#mfa-cancel').onclick = async () => { try { await SB.auth.mfa.unenroll({ factorId }); } catch{} m.remove(); resolve(false); };
+    m.querySelector('#mfa-ok').onclick = async () => {
+      const code = m.querySelector('#mfa-code').value.trim();
+      const { data: ch, error: e1 } = await SB.auth.mfa.challenge({ factorId });
+      if (e1) { toast(e1.message, 'error'); return; }
+      const { error: e2 } = await SB.auth.mfa.verify({ factorId, challengeId: ch.id, code });
+      if (e2) { toast('Código inválido', 'error'); return; }
+      m.remove(); toast('2FA ativado!', 'success'); resolve(true);
+    };
+  });
+}
+
+async function mfaChallenge(factorId) {
+  const { data: ch, error } = await SB.auth.mfa.challenge({ factorId });
+  if (error) { toast(error.message, 'error'); return false; }
+  return new Promise(resolve => {
+    const m = mfaModal(`
+      <h2 style="color:#1B2A5E;margin:0 0 10px;font-size:18px;">Código do autenticador</h2>
+      <p style="font-size:13px;color:#6b7280;margin-bottom:16px;">Abra o app autenticador e digite o código de 6 dígitos.</p>
+      <input id="mfa-code" placeholder="000000" maxlength="6" inputmode="numeric" autofocus style="font-size:24px;text-align:center;padding:10px;width:160px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:16px;">
+      <div style="display:flex;gap:8px;justify-content:center;">
+        <button id="mfa-cancel" class="btn secondary" style="width:auto;padding:8px 14px;">Cancelar</button>
+        <button id="mfa-ok" class="btn" style="width:auto;padding:8px 14px;">Verificar</button>
+      </div>
+    `);
+    m.querySelector('#mfa-cancel').onclick = () => { m.remove(); resolve(false); };
+    m.querySelector('#mfa-ok').onclick = async () => {
+      const code = m.querySelector('#mfa-code').value.trim();
+      const { error } = await SB.auth.mfa.verify({ factorId, challengeId: ch.id, code });
+      if (error) { toast('Código inválido', 'error'); return; }
+      m.remove(); resolve(true);
+    };
   });
 }
 
