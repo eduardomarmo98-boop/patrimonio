@@ -2,6 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#1B2A5E">
 <meta name="description" content="Controle de Patrimônio Brandão & Marmo Engenharia">
@@ -534,9 +535,8 @@ const BMStore = {
       // Estas entradas servem apenas para mapear e-mail → id numérico
       // usado internamente pelo app (criadoPor, responsavelAtualId, etc.).
       usuarios: [
-        { id: 1, nome: 'Diretoria',           email: 'diretoria@brandaomarmo.com', perfil: 'diretoria',  setor: 'Diretoria' },
-        { id: 2, nome: 'Administrador TI',    email: 'ti@brandaomarmo.com',        perfil: 'admin_ti',   setor: 'TI' },
-        { id: 3, nome: 'Administrador Obras', email: 'obras@brandaomarmo.com',     perfil: 'admin_obras',setor: 'Obras' }
+        { id: 1, nome: 'Diretoria',        email: 's.marmo@brandaoemarmo.com.br',   perfil: 'diretoria', setor: 'Diretoria' },
+        { id: 2, nome: 'Administrador TI', email: 'ti@brandaoemarmo.com.br',        perfil: 'admin_ti',  setor: 'TI' }
       ],
       categorias: [
         { id: 1, nome: 'Obra', icone: '🦺' },
