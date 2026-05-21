@@ -799,6 +799,23 @@ function toast(msg, kind='') {
   setTimeout(() => t.remove(), 2200);
 }
 
+/* ============== NOTIFICAÇÕES WHATSAPP (Evolution API via Edge Function) ============== */
+/* Fire-and-forget: nunca quebra a UX do app se o WhatsApp falhar.
+   A Edge Function `notificar-whatsapp` é quem fala com a Evolution API. */
+async function notificarWhatsApp(evento, dados) {
+  if (!SB) return;
+  try {
+    const { data, error } = await SB.functions.invoke('notificar-whatsapp', {
+      body: { evento, dados }
+    });
+    if (error) console.warn('[whatsapp] invoke erro:', error);
+    else if (data && data.whatsapp_error) console.warn('[whatsapp] envio falhou:', data.whatsapp_error);
+    else console.log('[whatsapp] enviado:', data);
+  } catch (e) {
+    console.warn('[whatsapp] exceção:', e);
+  }
+}
+
 /* ============== AUTH & PERMISSIONS ============== */
 
 const Perms = {
@@ -2282,6 +2299,16 @@ function bindCreate() {
         motivo: isOperador ? 'Solicitação de cadastro de licença — aguardando aprovação' : 'Licença cadastrada'
       });
       save();
+      notificarWhatsApp('patrimonio_cadastrado', {
+        codigo: sw.codigoBarras,
+        descricao: sw.descricao,
+        categoria: 'TI - Softwares',
+        subcategoria: subcatNome,
+        responsavel: resp,
+        valor: sw.valorAquisicao,
+        criadoPor: u.nome,
+        aguardandoAprovacao: isOperador,
+      });
       toast(
         isOperador
           ? 'Solicitação enviada — aguardando aprovação do administrador'
@@ -2331,6 +2358,17 @@ function bindCreate() {
       destinoLocalId: novo.localizacaoAtualId, destinoRespId: novo.responsavelAtualId
     });
     save();
+    notificarWhatsApp('patrimonio_cadastrado', {
+      codigo: novo.codigoBarras,
+      descricao: novo.descricao,
+      categoria: ((DB.categorias||[]).find(c => c.id === novo.categoriaId) || {}).nome,
+      subcategoria: ((DB.subcategorias||[]).find(s => s.id === novo.subcategoriaId) || {}).nome,
+      responsavel: (Lookup.user(novo.responsavelAtualId) || {}).nome,
+      localizacao: ((DB.localizacoes||[]).find(l => l.id === novo.localizacaoAtualId) || {}).nome,
+      valor: novo.valorAquisicao,
+      criadoPor: u.nome,
+      aguardandoAprovacao: isOperador,
+    });
     toast(
       isOperador
         ? 'Solicitação enviada — aguardando aprovação do administrador'
