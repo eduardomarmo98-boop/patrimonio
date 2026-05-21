@@ -2519,24 +2519,6 @@ function renderMore() {
     </div>
 
     <div class="card">
-      <h2>📲 Notificações WhatsApp</h2>
-      <div class="card-hint">Configure para receber notificações sobre seus itens e pendências.<br>
-        <a href="https://www.callmebot.com/blog/free-api-whatsapp-messages/" target="_blank" style="color:var(--brand-orange)">Como ativar o CallMeBot →</a>
-      </div>
-      <div class="form-group" style="margin-top:12px">
-        <label>Telefone (com código do país, ex: 5511999999999)</label>
-        <input type="tel" id="wa-phone" value="${escapeHtml(u.whatsappPhone||'')}" placeholder="5511999999999">
-      </div>
-      <div class="form-group">
-        <label>Chave API do CallMeBot</label>
-        <input type="text" id="wa-apikey" value="${escapeHtml(u.whatsappApiKey||'')}" placeholder="123456">
-      </div>
-      <button class="btn" data-action="save-whatsapp" style="margin-top:4px">💾 Salvar configuração</button>
-      <button class="btn secondary" data-action="test-whatsapp" style="margin-top:8px">🔔 Enviar mensagem de teste</button>
-    </div>
-
-
-    <div class="card">
       <h2>Sobre</h2>
       <div class="detail-row"><span class="label">Sistema</span><span class="value">Brandão &amp; Marmo — Controle de Patrimônio</span></div>
     </div>
@@ -2558,30 +2540,6 @@ function bindMore() {
   $$('[data-action="cad-subcat"]').forEach(b => b.addEventListener('click', openCadSubcat));
   $$('[data-action="import-csv"]').forEach(b => b.addEventListener('click', openImportCsv));
   $$('[data-action="cad-sw"]').forEach(b => b.addEventListener('click', () => { State.tab='create'; render(); setTimeout(()=>{ const s=$('#c-cat'); if(s){s.value='3'; s.dispatchEvent(new Event('change')); const sw=$('#software-fields'); if(sw) sw.style.display='block'; } },100); }));
-  $$('[data-action="save-whatsapp"]').forEach(b => b.addEventListener('click', () => {
-    const phone  = $('#wa-phone')  ? $('#wa-phone').value.trim()  : '';
-    const apikey = $('#wa-apikey') ? $('#wa-apikey').value.trim() : '';
-    const u = DB.usuarios.find(x => x.id === DB.currentUser);
-    if (!u) return;
-    u.whatsappPhone  = phone;
-    u.whatsappApiKey = apikey;
-    save();
-    toast('Configuração de WhatsApp salva!', 'success');
-  }));
-
-  $$('[data-action="test-whatsapp"]').forEach(b => b.addEventListener('click', async () => {
-    const phone  = $('#wa-phone')  ? $('#wa-phone').value.trim()  : '';
-    const apikey = $('#wa-apikey') ? $('#wa-apikey').value.trim() : '';
-    if (!phone || !apikey) return toast('Preencha telefone e chave API primeiro', 'error');
-    const msg = '[B&M Patrimônio] Teste de notificação — sistema configurado com sucesso!';
-    const url = `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(msg)}&apikey=${encodeURIComponent(apikey)}`;
-    try {
-      toast('Enviando mensagem de teste...', 'success');
-      await fetch(url, { mode: 'no-cors' });
-    } catch(e) { /* no-cors — ignora erro de CORS */ }
-    toast('Mensagem enviada! Verifique seu WhatsApp.', 'success');
-  }));
-
 }
 
 /* ============== INVENTORY ============== */
@@ -3011,9 +2969,8 @@ function openCadUser() {
         </div>
         <h2 style="margin-top:14px;">Adicionar usuário</h2>
         <div style="background:#dcfce7;border:1px solid #16a34a;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#166534;line-height:1.45;">
-          <strong>✓ Cadastro automático:</strong> ao salvar, o sistema cria o login no Supabase e
-          gera uma senha temporária forte (16 caracteres) que será exibida na tela.
-          Copie e envie ao usuário por WhatsApp. Ele poderá trocar a senha depois pelo botão 🔑.
+          <strong>✓ Cadastro automático:</strong> defina a senha inicial abaixo (mín. 12 caracteres).
+          Envie ao usuário por WhatsApp — ele pode trocar depois pelo botão 🔑.
         </div>
         <form id="user-form">
           <div class="form-group"><label>Nome</label><input type="text" id="u-nome" required></div>
@@ -3023,6 +2980,13 @@ function openCadUser() {
             <select id="u-perfil">
               ${perfisDisp.map(([v,l]) => `<option value="${v}">${l}</option>`).join('')}
             </select>
+          </div>
+          <div class="form-group">
+            <label>Senha inicial <span style="font-weight:normal;color:var(--muted);font-size:11px;">(mín. 12)</span></label>
+            <div style="display:flex;gap:6px;">
+              <input type="text" id="u-senha" required minlength="12" style="flex:1;font-family:monospace;">
+              <button type="button" id="u-gen" class="btn secondary" style="width:auto;padding:6px 10px;font-size:12px;">🎲 Gerar</button>
+            </div>
           </div>
           <button class="btn">Adicionar</button>
         </form>
@@ -3090,6 +3054,20 @@ function openCadUser() {
     }
   }));
 
+  // Botão "Gerar senha"
+  const genPwd = () => {
+    const A='ABCDEFGHJKLMNPQRSTUVWXYZ', a='abcdefghijkmnpqrstuvwxyz', d='23456789', s='!@#$%&*';
+    const all = A+a+d+s; const pick = (set) => set[Math.floor(Math.random()*set.length)];
+    let p = pick(A)+pick(a)+pick(d)+pick(s);
+    for (let i=0;i<12;i++) p += pick(all);
+    return p.split('').sort(()=>Math.random()-0.5).join('');
+  };
+  const genBtn = node.querySelector('#u-gen');
+  if (genBtn) genBtn.addEventListener('click', () => { node.querySelector('#u-senha').value = genPwd(); });
+  // Já preenche com sugestão ao abrir
+  const senhaInput = node.querySelector('#u-senha');
+  if (senhaInput && !senhaInput.value) senhaInput.value = genPwd();
+
   node.querySelector('#user-form').addEventListener('submit', async e => {
     e.preventDefault();
     // Fase 3: a fonte da verdade é `profiles`. Criar usuário aqui exigiria
@@ -3125,15 +3103,7 @@ function openCadUser() {
     if (!SB) return toast('Supabase indisponível', 'error');
     if (u.perfil !== 'diretoria') return toast('Apenas a Diretoria pode criar usuários.', 'error');
     if (!email || !nome) return toast('Preencha nome e e-mail.', 'error');
-    // Sugere uma senha forte; a Diretoria pode editar/digitar a própria.
-    const sugestao = (() => {
-      const A='ABCDEFGHJKLMNPQRSTUVWXYZ', a='abcdefghijkmnpqrstuvwxyz', d='23456789', s='!@#$%&*';
-      const all = A+a+d+s; const pick = (set) => set[Math.floor(Math.random()*set.length)];
-      let p = pick(A)+pick(a)+pick(d)+pick(s);
-      for (let i=0;i<12;i++) p += pick(all);
-      return p.split('').sort(()=>Math.random()-0.5).join('');
-    })();
-    const senha = (prompt('Defina a senha inicial (mín. 12 caracteres). Sugestão:', sugestao) || '').trim();
+    const senha = (node.querySelector('#u-senha').value || '').trim();
     if (senha.length < 12) return toast('Senha precisa ter ao menos 12 caracteres', 'error');
     try {
       const { data, error } = await SB.functions.invoke('criar-usuario', {
