@@ -2982,9 +2982,9 @@ function openCadUser() {
             </select>
           </div>
           <div class="form-group">
-            <label>Senha inicial <span style="font-weight:normal;color:var(--muted);font-size:11px;">(mín. 12)</span></label>
+            <label>Senha inicial <span style="font-weight:normal;color:var(--muted);font-size:11px;">(mín. 6)</span></label>
             <div style="display:flex;gap:6px;">
-              <input type="text" id="u-senha" required minlength="12" style="flex:1;font-family:monospace;">
+              <input type="text" id="u-senha" required minlength="6" style="flex:1;font-family:monospace;">
               <button type="button" id="u-gen" class="btn secondary" style="width:auto;padding:6px 10px;font-size:12px;">🎲 Gerar</button>
             </div>
           </div>
@@ -3104,7 +3104,7 @@ function openCadUser() {
     if (u.perfil !== 'diretoria') return toast('Apenas a Diretoria pode criar usuários.', 'error');
     if (!email || !nome) return toast('Preencha nome e e-mail.', 'error');
     const senha = (node.querySelector('#u-senha').value || '').trim();
-    if (senha.length < 12) return toast('Senha precisa ter ao menos 12 caracteres', 'error');
+    if (senha.length < 6) return toast('Senha precisa ter ao menos 6 caracteres', 'error');
     try {
       const { data, error } = await SB.functions.invoke('criar-usuario', {
         body: { email, nome, perfil, setor, senha }
