@@ -2972,10 +2972,10 @@ function openCadUser() {
           }).join('')}
         </div>
         <h2 style="margin-top:14px;">Adicionar usuário</h2>
-        <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#92400e;line-height:1.45;">
-          <strong>⚠ Dois passos:</strong> (1) preencha abaixo para registrar o usuário aqui no app;
-          (2) no painel do Supabase, vá em <em>Authentication → Users → Add user</em>
-          e crie o login com o mesmo e-mail. A senha é definida lá (com hash) — nunca aparece no app.
+        <div style="background:#dcfce7;border:1px solid #16a34a;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#166534;line-height:1.45;">
+          <strong>✓ Cadastro automático:</strong> ao salvar, o sistema cria o login no Supabase e
+          gera uma senha temporária forte (16 caracteres) que será exibida na tela.
+          Copie e envie ao usuário por WhatsApp. Ele poderá trocar a senha depois pelo botão 🔑.
         </div>
         <form id="user-form">
           <div class="form-group"><label>Nome</label><input type="text" id="u-nome" required></div>
@@ -3087,15 +3087,16 @@ function openCadUser() {
     if (!SB) return toast('Supabase indisponível', 'error');
     if (u.perfil !== 'diretoria') return toast('Apenas a Diretoria pode criar usuários.', 'error');
     if (!email || !nome) return toast('Preencha nome e e-mail.', 'error');
-    // Gera senha temporária forte (16 chars: maiúsc + minúsc + dígito + símbolo)
-    const senha = (() => {
+    // Sugere uma senha forte; a Diretoria pode editar/digitar a própria.
+    const sugestao = (() => {
       const A='ABCDEFGHJKLMNPQRSTUVWXYZ', a='abcdefghijkmnpqrstuvwxyz', d='23456789', s='!@#$%&*';
-      const all = A+a+d+s;
-      const pick = (set) => set[Math.floor(Math.random()*set.length)];
+      const all = A+a+d+s; const pick = (set) => set[Math.floor(Math.random()*set.length)];
       let p = pick(A)+pick(a)+pick(d)+pick(s);
       for (let i=0;i<12;i++) p += pick(all);
       return p.split('').sort(()=>Math.random()-0.5).join('');
     })();
+    const senha = (prompt('Defina a senha inicial (mín. 12 caracteres). Sugestão:', sugestao) || '').trim();
+    if (senha.length < 12) return toast('Senha precisa ter ao menos 12 caracteres', 'error');
     try {
       const { data, error } = await SB.functions.invoke('criar-usuario', {
         body: { email, nome, perfil, setor, senha }
