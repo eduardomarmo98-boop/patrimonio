@@ -468,86 +468,283 @@ const Auth = {
 };
 
 /* ------------------------------------------------------------ */
+/* Fase 3 — persistência relacional.
+   load() lê das 7 tabelas (categorias, subcategorias, localizacoes,
+   software_tipos, patrimonios, movimentacoes, inventarios) + profiles.
+   save() é diff-based: compara o DB atual com o último baseline e
+   roteia INSERTs/UPDATEs/DELETEs por linha. Movimentações são insert-only.
+*/
 const BMStore = {
   KEY: 'bm_patrimonio_prod',
-  _saving: false,
-  _pending: null,
+  _baseline: null,
+  _saveQueue: Promise.resolve(),
 
   _stripSession(d) { if (!d) return d; const { currentUser, ...rest } = d; return rest; },
+  _clone(d) { return JSON.parse(JSON.stringify(d)); },
 
-  async load() {
-    // load() não decide quem é o currentUser — isso fica com Auth.
-    // Apenas devolve o estado compartilhado do app.
-    if (SB) {
-      try {
-        const { data, error } = await SB.from('app_state').select('data').eq('id', 1).maybeSingle();
-        if (error) throw error;
-        if (data && data.data && Object.keys(data.data).length > 0) {
-          localStorage.setItem(this.KEY, JSON.stringify(data.data));
-          return { ...data.data, currentUser: null };
-        }
-        const seeded = this.seed();
-        await SB.from('app_state').upsert({ id: 1, data: this._stripSession(seeded), updated_at: new Date().toISOString() });
-        return { ...seeded, currentUser: null };
-      } catch (e) {
-        console.warn('[Supabase] load falhou, usando cache local:', e.message);
-      }
-    }
-    const raw = localStorage.getItem(this.KEY);
-    if (raw) { try { return { ...JSON.parse(raw), currentUser: null }; } catch {} }
-    return { ...this.seed(), currentUser: null };
+  /* ---------- Mapeamentos snake_case ⇄ camelCase ---------- */
+  _patrimonioFromRow(r) {
+    return {
+      id: r.id,
+      codigoBarras: r.codigo_barras,
+      descricao: r.descricao,
+      categoriaId: r.categoria_id,
+      subcategoriaId: r.subcategoria_id,
+      marca: r.marca, modelo: r.modelo,
+      numeroSerie: r.numero_serie,
+      notaFiscal: r.nota_fiscal,
+      dataAquisicao: r.data_aquisicao,
+      valorAquisicao: r.valor_aquisicao != null ? Number(r.valor_aquisicao) : 0,
+      dataRegistro: r.data_registro,
+      observacoes: r.observacoes,
+      foto: r.foto,
+      status: r.status,
+      localizacaoAtualId: r.localizacao_atual_id,
+      responsavelAtualId: r.responsavel_atual_id,
+      softwareTipoId: r.software_tipo_id,
+      tipoSoftware: r.tipo_software,
+      licencaChave: r.licenca_chave,
+      licencaValidade: r.licenca_validade,
+      licencaResponsavel: r.licenca_responsavel,
+      licencaEquipamento: r.licenca_equipamento,
+      criadoPor: r.criado_por,
+      criadoEm: r.criado_em,
+      atualizadoEm: r.atualizado_em,
+      solicitadoPor: r.solicitado_por,
+      solicitacaoMotivo: r.solicitacao_motivo,
+      solicitadoMovPor: r.solicitado_mov_por,
+      pendingMove: r.pending_move
+    };
+  },
+  _patrimonioToRow(p) {
+    return {
+      id: p.id,
+      codigo_barras: p.codigoBarras || null,
+      descricao: p.descricao || '',
+      categoria_id: p.categoriaId || null,
+      subcategoria_id: p.subcategoriaId || null,
+      marca: p.marca || null, modelo: p.modelo || null,
+      numero_serie: p.numeroSerie || null,
+      nota_fiscal: p.notaFiscal || null,
+      data_aquisicao: p.dataAquisicao || null,
+      valor_aquisicao: p.valorAquisicao || 0,
+      data_registro: p.dataRegistro || null,
+      observacoes: p.observacoes || null,
+      foto: p.foto || null,
+      status: p.status || 'ativo',
+      localizacao_atual_id: p.localizacaoAtualId || null,
+      responsavel_atual_id: p.responsavelAtualId || null,
+      software_tipo_id: p.softwareTipoId || null,
+      tipo_software: p.tipoSoftware || null,
+      licenca_chave: p.licencaChave || null,
+      licenca_validade: p.licencaValidade || null,
+      licenca_responsavel: p.licencaResponsavel || null,
+      licenca_equipamento: p.licencaEquipamento || null,
+      criado_por: p.criadoPor || null,
+      criado_em: p.criadoEm || new Date().toISOString(),
+      // atualizado_em é setado pelo trigger do banco
+      solicitado_por: p.solicitadoPor || null,
+      solicitacao_motivo: p.solicitacaoMotivo || null,
+      solicitado_mov_por: p.solicitadoMovPor || null,
+      pending_move: p.pendingMove || null
+    };
+  },
+  _movFromRow(r) {
+    return {
+      id: r.id, patrimonioId: r.patrimonio_id, tipo: r.tipo, data: r.data,
+      usuarioId: r.usuario_id,
+      origemLocalId: r.origem_local_id, destinoLocalId: r.destino_local_id,
+      origemRespId: r.origem_resp_id, destinoRespId: r.destino_resp_id,
+      motivo: r.motivo
+    };
+  },
+  _movToRow(m) {
+    return {
+      id: m.id, patrimonio_id: m.patrimonioId, tipo: m.tipo,
+      data: m.data || new Date().toISOString(),
+      usuario_id: m.usuarioId || null,
+      origem_local_id: m.origemLocalId || null,
+      destino_local_id: m.destinoLocalId || null,
+      origem_resp_id: m.origemRespId || null,
+      destino_resp_id: m.destinoRespId || null,
+      motivo: m.motivo || null
+    };
+  },
+  _catToRow(c)    { return { id: c.id, nome: c.nome, icone: c.icone || null }; },
+  _subcatToRow(s) { return { id: s.id, nome: s.nome, categoria_id: s.categoriaId }; },
+  _locToRow(l)    { return { id: l.id, nome: l.nome, tipo: l.tipo || null, parent_id: l.parent || null }; },
+  _swtToRow(s)    { return { id: s.id, nome: s.nome }; },
+  _invToRow(i) {
+    // O schema só tem nome/iniciado_em/finalizado_em/responsavel_id/itens.
+    // Campos extras do app (localizacaoId, esperados, lidos, faltantes, fora)
+    // são serializados dentro de `itens` pra não perder dados.
+    const extras = {};
+    ['localizacaoId','esperados','lidos','faltantes','fora','encontrados'].forEach(k => {
+      if (i[k] !== undefined) extras[k] = i[k];
+    });
+    const itens = Array.isArray(i.itens) ? i.itens : (i.itens || []);
+    return {
+      id: i.id,
+      nome: i.nome || 'Inventário',
+      iniciado_em: i.iniciadoEm || new Date().toISOString(),
+      finalizado_em: i.finalizadoEm || null,
+      responsavel_id: i.responsavelId || i.iniciadoPor || null,
+      itens: Object.keys(extras).length ? { ...extras, lista: itens } : itens
+    };
   },
 
+  /* ---------- Load ---------- */
+  async load() {
+    if (!SB) {
+      const raw = localStorage.getItem(this.KEY);
+      const data = raw ? (() => { try { return JSON.parse(raw); } catch { return this.seed(); } })() : this.seed();
+      this._baseline = this._clone(data);
+      return { ...data, currentUser: null };
+    }
+    try {
+      const [profs, cats, subs, locs, swts, patrs, movs, invs] = await Promise.all([
+        SB.from('profiles').select('id,email,nome,perfil,setor,ativo').order('email'),
+        SB.from('categorias').select('*').order('id'),
+        SB.from('subcategorias').select('*').order('id'),
+        SB.from('localizacoes').select('*').order('id'),
+        SB.from('software_tipos').select('*').order('id'),
+        SB.from('patrimonios').select('*').order('id'),
+        SB.from('movimentacoes').select('*').order('id'),
+        SB.from('inventarios').select('*').order('id')
+      ]);
+      const err = [profs, cats, subs, locs, swts, patrs, movs, invs].find(r => r.error);
+      if (err) throw new Error(err.error.message);
+
+      const data = {
+        usuarios: (profs.data || []).map(p => ({
+          id: p.id, nome: p.nome || p.email, email: p.email,
+          perfil: p.perfil || 'operador', setor: p.setor || '',
+          ativo: p.ativo !== false
+        })),
+        categorias: (cats.data || []).map(c => ({ id: c.id, nome: c.nome, icone: c.icone })),
+        subcategorias: (subs.data || []).map(s => ({ id: s.id, nome: s.nome, categoriaId: s.categoria_id })),
+        localizacoes: (locs.data || []).map(l => ({ id: l.id, nome: l.nome, tipo: l.tipo, parent: l.parent_id })),
+        softwareTipos: (swts.data || []).map(s => ({ id: s.id, nome: s.nome })),
+        patrimonios: (patrs.data || []).map(r => this._patrimonioFromRow(r)),
+        movimentacoes: (movs.data || []).map(r => this._movFromRow(r)),
+        inventarios: (invs.data || []).map(i => {
+          // itens pode ser array (legado) ou objeto { localizacaoId, esperados, ..., lista }
+          const it = i.itens;
+          const isWrapped = it && !Array.isArray(it) && typeof it === 'object';
+          const extras = isWrapped ? it : {};
+          const lista = isWrapped ? (it.lista || []) : (Array.isArray(it) ? it : []);
+          return {
+            id: i.id, nome: i.nome,
+            iniciadoEm: i.iniciado_em, finalizadoEm: i.finalizado_em,
+            responsavelId: i.responsavel_id, iniciadoPor: i.responsavel_id,
+            localizacaoId: extras.localizacaoId,
+            esperados: extras.esperados, lidos: extras.lidos,
+            faltantes: extras.faltantes, fora: extras.fora, encontrados: extras.encontrados,
+            itens: lista
+          };
+        }),
+        _nextId: {}
+      };
+      const maxId = (arr) => (arr || []).reduce((acc, x) => Math.max(acc, x.id || 0), 0);
+      data._nextId = {
+        patrimonios:   maxId(data.patrimonios)   + 1,
+        movimentacoes: maxId(data.movimentacoes) + 1,
+        localizacoes:  maxId(data.localizacoes)  + 1,
+        subcategorias: maxId(data.subcategorias) + 1,
+        softwareTipos: maxId(data.softwareTipos) + 1,
+        inventarios:   maxId(data.inventarios)   + 1
+      };
+      try { localStorage.setItem(this.KEY, JSON.stringify(data)); } catch {}
+      this._baseline = this._clone(data);
+      return { ...data, currentUser: null };
+    } catch (e) {
+      console.warn('[Supabase] load falhou, usando cache local:', e.message);
+      const raw = localStorage.getItem(this.KEY);
+      const data = raw ? (() => { try { return JSON.parse(raw); } catch { return this.seed(); } })() : this.seed();
+      this._baseline = this._clone(data);
+      return { ...data, currentUser: null };
+    }
+  },
+
+  /* ---------- Save (diff-based) ---------- */
   save(data) {
     const shared = this._stripSession(data);
-    localStorage.setItem(this.KEY, JSON.stringify(shared));
+    try { localStorage.setItem(this.KEY, JSON.stringify(shared)); } catch {}
     if (!SB) return;
-    this._pending = shared;
-    if (this._saving) return;
-    this._saving = true;
-    queueMicrotask(async () => {
-      while (this._pending) {
-        const payload = this._pending; this._pending = null;
-        const { error } = await SB.from('app_state')
-          .upsert({ id: 1, data: payload, updated_at: new Date().toISOString() });
-        if (error) {
-          // 401/403 indica falta de sessão válida — RLS bloqueou
-          console.error('[Supabase] save erro:', error.message);
-        }
-      }
-      this._saving = false;
-    });
+    const snapshot = this._clone(shared);
+    this._saveQueue = this._saveQueue
+      .then(() => this._persistDiff(snapshot))
+      .catch(e => { console.error('[Supabase] save erro:', e && (e.message || e)); toast('Erro ao salvar: ' + (e && e.message || 'desconhecido'), 'error'); });
   },
 
+  async _persistDiff(curr) {
+    const base = this._baseline || { categorias:[], subcategorias:[], localizacoes:[], softwareTipos:[], patrimonios:[], movimentacoes:[], inventarios:[] };
+
+    // Coleções com UPSERT + DELETE
+    await this._syncCollection('categorias',    base.categorias,    curr.categorias    || [], (x) => this._catToRow(x));
+    await this._syncCollection('subcategorias', base.subcategorias, curr.subcategorias || [], (x) => this._subcatToRow(x));
+    await this._syncCollection('localizacoes',  base.localizacoes,  curr.localizacoes  || [], (x) => this._locToRow(x));
+    await this._syncCollection('software_tipos',base.softwareTipos, curr.softwareTipos || [], (x) => this._swtToRow(x));
+    await this._syncCollection('patrimonios',   base.patrimonios,   curr.patrimonios   || [], (x) => this._patrimonioToRow(x));
+    await this._syncCollection('inventarios',   base.inventarios,   curr.inventarios   || [], (x) => this._invToRow(x));
+
+    // Movimentações: insert-only (RLS bloqueia UPDATE)
+    const baseMovIds = new Set((base.movimentacoes || []).map(m => m.id));
+    const newMovs = (curr.movimentacoes || []).filter(m => !baseMovIds.has(m.id));
+    if (newMovs.length) {
+      const { error } = await SB.from('movimentacoes').insert(newMovs.map(m => this._movToRow(m)));
+      if (error) throw new Error('movimentacoes insert: ' + error.message);
+    }
+
+    this._baseline = this._clone(curr);
+  },
+
+  async _syncCollection(table, baseArr, currArr, toRow) {
+    const baseMap = new Map((baseArr || []).map(x => [x.id, x]));
+    const currMap = new Map((currArr || []).map(x => [x.id, x]));
+
+    const upserts = [];
+    for (const [id, x] of currMap) {
+      const prev = baseMap.get(id);
+      if (!prev || JSON.stringify(prev) !== JSON.stringify(x)) upserts.push(toRow(x));
+    }
+    if (upserts.length) {
+      const { error } = await SB.from(table).upsert(upserts, { onConflict: 'id' });
+      if (error) throw new Error(`${table} upsert: ${error.message}`);
+    }
+    const deletedIds = [];
+    for (const [id] of baseMap) if (!currMap.has(id)) deletedIds.push(id);
+    if (deletedIds.length) {
+      const { error } = await SB.from(table).delete().in('id', deletedIds);
+      if (error) throw new Error(`${table} delete: ${error.message}`);
+    }
+  },
+
+  /* ---------- Realtime ---------- */
   subscribe(onChange) {
     if (!SB) return null;
-    return SB.channel('app_state_realtime')
-      .on('postgres_changes',
-          { event: '*', schema: 'public', table: 'app_state' },
-          (payload) => { if (payload.new && payload.new.data) onChange(payload.new.data); })
-      .subscribe();
+    const tables = ['categorias','subcategorias','localizacoes','software_tipos','patrimonios','movimentacoes','inventarios','profiles'];
+    const ch = SB.channel('bm_relacional');
+    let queued = false;
+    const trigger = () => {
+      if (queued) return; queued = true;
+      setTimeout(() => { queued = false; onChange(); }, 250);
+    };
+    tables.forEach(t => ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, trigger));
+    return ch.subscribe();
   },
 
+  /* ---------- Seed (apenas fallback offline) ---------- */
   seed() {
     return {
-      currentUser: null,
-      // Senhas e autenticação são gerenciadas pelo Supabase Auth (auth.users).
-      // Estas entradas servem apenas para mapear e-mail → id numérico
-      // usado internamente pelo app (criadoPor, responsavelAtualId, etc.).
-      usuarios: [
-        { id: 1, nome: 'Diretoria',        email: 's.marmo@brandaoemarmo.com.br',   perfil: 'diretoria', setor: 'Diretoria' },
-        { id: 2, nome: 'Administrador TI', email: 'ti@brandaoemarmo.com.br',        perfil: 'admin_ti',  setor: 'TI' }
-      ],
+      usuarios: [],
       categorias: [
         { id: 1, nome: 'Obra', icone: '🦺' },
         { id: 2, nome: 'TI - Equipamentos', icone: '💻' },
         { id: 3, nome: 'TI - Softwares',    icone: '🔑' }
       ],
-      localizacoes: [
-        { id: 1, nome: 'Sede Administrativa', tipo: 'unidade', parent: null }
-      ],
-      patrimonios: [],
-      movimentacoes: [],
+      localizacoes: [{ id: 1, nome: 'Sede Administrativa', tipo: 'unidade', parent: null }],
+      patrimonios: [], movimentacoes: [],
       subcategorias: [
         { id: 1,  nome: 'Computadores/Notebooks', categoriaId: 2 },
         { id: 2,  nome: 'Monitores',              categoriaId: 2 },
@@ -565,16 +762,27 @@ const BMStore = {
         { id: 14, nome: 'Sistema Operacional',    categoriaId: 3 },
         { id: 15, nome: 'Outros',                 categoriaId: 3 }
       ],
-      softwareTipos: [],
-      inventarios: [],
-      _nextId: { patrimonios: 1, movimentacoes: 1, localizacoes: 2, usuarios: 4, inventarios: 1, subcategorias: 16 }
+      softwareTipos: [], inventarios: [],
+      _nextId: { patrimonios: 1, movimentacoes: 1, localizacoes: 2, inventarios: 1, subcategorias: 16, softwareTipos: 1 }
     };
   }
 };
 
-let DB = { usuarios: [], categorias: [], subcategorias: [], localizacoes: [], patrimonios: [], movimentacoes: [], inventarios: [], softwareTipos: [], _nextId: { patrimonios:1, movimentacoes:1, localizacoes:1, usuarios:1, inventarios:1, subcategorias:1 } };
+let DB = { usuarios: [], categorias: [], subcategorias: [], localizacoes: [], patrimonios: [], movimentacoes: [], inventarios: [], softwareTipos: [], _nextId: { patrimonios:1, movimentacoes:1, localizacoes:1, inventarios:1, subcategorias:1, softwareTipos:1 } };
 const save = () => BMStore.save(DB);
-const nextId = (col) => { DB._nextId[col] = (DB._nextId[col] || 1); const id = DB._nextId[col]++; save(); return id; };
+/* nextId: gera o próximo id numérico em memória.
+   As tabelas no Postgres têm SERIAL/BIGSERIAL, mas a UI continua precisando
+   de id local pra referências antes do upsert chegar ao banco. Em caso de
+   colisão, o UPSERT no banco usa esse id; a sequence é mantida coerente
+   via setval no script de migração. */
+const nextId = (col) => {
+  if (!DB._nextId) DB._nextId = {};
+  if (!DB._nextId[col]) {
+    const max = (DB[col] || []).reduce((acc, x) => Math.max(acc, x.id || 0), 0);
+    DB._nextId[col] = max + 1;
+  }
+  return DB._nextId[col]++;
+};
 
 const $ = (sel, root=document) => root.querySelector(sel);
 const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
@@ -892,40 +1100,24 @@ async function mfaChallenge(factorId) {
   });
 }
 
-/* Sincroniza DB.usuarios com o usuário autenticado.
-   Retorna o id numérico interno (ou null se não puder provisionar). */
+/* Fase 3: DB.usuarios é populado por BMStore.load() a partir de `profiles`
+   (uuid como id). Aqui apenas localizamos o entry pelo uuid do Auth e
+   devolvemos o id (uuid string). Sem mutação local — profiles é a fonte. */
 async function syncCurrentUserFromAuth(authUser) {
-  if (!authUser || !authUser.email) return null;
-  const email = authUser.email.toLowerCase();
-  const profile = await Auth.fetchProfile(authUser.id);
-  if (profile && profile.ativo === false) {
+  if (!authUser || !authUser.id) return null;
+  const entry = DB.usuarios.find(x => x.id === authUser.id);
+  if (!entry) {
+    // Sessão válida mas sem profile: o trigger on_auth_user_created deveria
+    // ter criado um. Pode ser que ainda não tenha replicado ou a conta foi
+    // desativada/removida. Não conseguimos seguir.
+    toast('Sua conta não está provisionada no app. Contate a Diretoria.', 'error');
+    return null;
+  }
+  if (entry.ativo === false) {
     toast('Sua conta está desativada. Contate a Diretoria.', 'error');
     return null;
   }
-  let entry = DB.usuarios.find(x => (x.email||'').toLowerCase() === email);
-  if (entry) {
-    // sincroniza perfil/nome/setor a partir da fonte da verdade (profiles)
-    if (profile) {
-      let changed = false;
-      if (profile.perfil && entry.perfil !== profile.perfil) { entry.perfil = profile.perfil; changed = true; }
-      if (profile.nome   && entry.nome   !== profile.nome)   { entry.nome   = profile.nome;   changed = true; }
-      if (profile.setor != null && entry.setor !== profile.setor) { entry.setor = profile.setor; changed = true; }
-      if (changed) save();
-    }
-    return entry.id;
-  }
-  // Não existe no DB.usuarios: cria a partir do profile
-  if (!profile) return null;
-  const novo = {
-    id: nextId('usuarios'),
-    nome: profile.nome || email,
-    email: authUser.email,
-    setor: profile.setor || '',
-    perfil: profile.perfil || 'operador'
-  };
-  DB.usuarios.push(novo);
-  save();
-  return novo.id;
+  return entry.id;  // uuid string
 }
 
 /* --- TOPBAR --- */
@@ -1521,7 +1713,7 @@ function openMove(patrimonioId) {
   node.querySelector('#move-form').addEventListener('submit', e => {
     e.preventDefault();
     const novoLocal = parseInt(node.querySelector('#m-local').value) || null;
-    const novoResp = parseInt(node.querySelector('#m-resp').value) || null;
+    const novoResp = node.querySelector('#m-resp').value || null;   // uuid (string)
     const motivo = node.querySelector('#m-motivo').value.trim();
     if (!novoLocal && !novoResp) return toast('Escolha local ou responsável', 'error');
 
@@ -1633,7 +1825,7 @@ function sendToMaintenance(patrimonioId) {
   node.addEventListener('click', e => { if (e.target === node) node.remove(); });
   node.querySelector('[data-close]').addEventListener('click', () => node.remove());
   node.querySelector('#mnt-confirm').addEventListener('click', () => {
-    const respId = parseInt(node.querySelector('#mnt-resp').value);
+    const respId = node.querySelector('#mnt-resp').value || null;   // uuid (string)
     const motivo = node.querySelector('#mnt-motivo').value.trim();
     if (!respId) return toast('Selecione o responsável', 'error');
     p.responsavelAtualId = respId;
@@ -2112,7 +2304,7 @@ function bindCreate() {
       dataAquisicao: $('#c-data').value || null,
       valorAquisicao: parseFloat($('#c-valor').value) || 0,
       localizacaoAtualId: parseInt($('#c-loc').value),
-      responsavelAtualId: parseInt($('#c-resp').value),
+      responsavelAtualId: $('#c-resp').value || null,   // uuid (string) do auth.users
       observacoes: $('#c-obs').value.trim(),
       foto: fotoDataURL,
       status: isOperador ? 'aguardando_aprovacao_cadastro' : 'aguardando_aceite',
@@ -2795,33 +2987,36 @@ function openCadUser() {
   node.querySelector('[data-close]').addEventListener('click', () => node.remove());
 
   node.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
-    const targetId = parseInt(b.dataset.del);
+    const targetId = b.dataset.del;            // uuid (string)
     const target = Lookup.user(targetId);
     if (!target) return;
     if (Lookup.hasItemsUnderCustody(targetId)) {
       return toast('Não é possível excluir: usuário possui bens sob custódia', 'error');
     }
     if (!confirm(
-      `Excluir o usuário ${target.nome}?\n\n` +
-      `IMPORTANTE: também desative o login dele no painel do Supabase ` +
-      `(Authentication → Users) — caso contrário ele ainda poderá entrar.`
+      `Desativar o usuário ${target.nome}?\n\n` +
+      `O login será impedido marcando o perfil como inativo. ` +
+      `Para REMOVER definitivamente, exclua também no painel do Supabase (Authentication → Users).`
     )) return;
-    DB.usuarios = DB.usuarios.filter(x => x.id !== targetId);
-    save();
-    // Tenta também desativar o perfil no banco (RLS só permite a Diretoria)
+    // Desativa o perfil no banco (RLS só permite a Diretoria)
     if (SB && u.perfil === 'diretoria') {
       try {
-        await SB.from('profiles').update({ ativo: false, updated_at: new Date().toISOString() })
-          .eq('email', target.email);
-      } catch (e) { console.warn('[profiles] desativar:', e.message); }
+        const { error } = await SB.from('profiles').update({ ativo: false, updated_at: new Date().toISOString() })
+          .eq('id', targetId);
+        if (error) throw error;
+      } catch (e) {
+        console.warn('[profiles] desativar:', e.message);
+        return toast('Erro ao desativar: ' + (e.message || ''), 'error');
+      }
     }
-    node.remove(); toast('Usuário excluído do app', 'success'); openCadUser();
+    // O DB.usuarios local será recarregado de profiles no próximo load()
+    node.remove(); toast('Usuário desativado', 'success'); openCadUser();
   }));
 
   // Trocar senha — APENAS o próprio usuário pode trocar a própria senha.
   // Senhas de outras pessoas só pelo painel Supabase (envio de reset por e-mail).
   node.querySelectorAll('[data-pw]').forEach(b => b.addEventListener('click', async () => {
-    const targetId = parseInt(b.dataset.pw);
+    const targetId = b.dataset.pw;             // uuid (string)
     const target = Lookup.user(targetId);
     if (!target) return;
     const isSelf = target.id === u.id;
@@ -2847,22 +3042,43 @@ function openCadUser() {
     }
   }));
 
-  node.querySelector('#user-form').addEventListener('submit', e => {
+  node.querySelector('#user-form').addEventListener('submit', async e => {
     e.preventDefault();
+    // Fase 3: a fonte da verdade é `profiles`. Criar usuário aqui exigiria
+    // service_role (proibido no client). O fluxo correto é:
+    //   1) Diretoria → painel Supabase → Authentication → Add user (envia convite)
+    //   2) O trigger on_auth_user_created cria a linha em `profiles` como 'operador'
+    //   3) Aqui na tela "Usuários", ajustar perfil/nome/setor via UPDATE em profiles
+    // (Quando a Edge Function `criar-usuario` for implantada, este botão chamará ela.)
     const email = node.querySelector('#u-email').value.trim().toLowerCase();
-    if (DB.usuarios.some(x => x.email.toLowerCase() === email)) {
-      return toast('Já existe um usuário com este e-mail', 'error');
+    const nome  = node.querySelector('#u-nome').value.trim();
+    const setor = node.querySelector('#u-setor').value.trim();
+    const perfil = node.querySelector('#u-perfil').value;
+    const existente = DB.usuarios.find(x => (x.email||'').toLowerCase() === email);
+    if (existente) {
+      // Atualiza profile do usuário já existente
+      if (!SB || u.perfil !== 'diretoria') {
+        return toast('Apenas a Diretoria pode editar perfis.', 'error');
+      }
+      try {
+        const { error } = await SB.from('profiles')
+          .update({ nome, setor, perfil, ativo: true, updated_at: new Date().toISOString() })
+          .eq('id', existente.id);
+        if (error) throw error;
+        node.remove();
+        toast('Perfil atualizado.', 'success');
+        openCadUser();
+      } catch (err) {
+        toast('Erro ao atualizar perfil: ' + (err.message || ''), 'error');
+      }
+      return;
     }
-    DB.usuarios.push({
-      id: nextId('usuarios'),
-      nome: node.querySelector('#u-nome').value.trim(),
-      email: node.querySelector('#u-email').value.trim(),
-      setor: node.querySelector('#u-setor').value.trim(),
-      perfil: node.querySelector('#u-perfil').value
-    });
-    save(); node.remove();
-    toast('Usuário adicionado. Agora crie o login no painel Supabase (Authentication → Users).', 'success');
-    openCadUser();
+    // Não existe: precisa ser criado no Supabase Auth primeiro.
+    toast(
+      'Para CRIAR um novo usuário, vá no painel Supabase (Authentication → Add user → Send invitation). ' +
+      'Depois volte aqui e edite perfil/nome/setor.',
+      'error'
+    );
   });
 }
 
@@ -3169,12 +3385,15 @@ if ('serviceWorker' in navigator) {
     render();
   }
 
-  // Realtime do estado compartilhado
-  BMStore.subscribe((newData) => {
-    if (!newData) return;
-    const myUserId = DB && DB.currentUser;
-    DB = { ...newData, currentUser: myUserId };
-    render();
+  // Realtime: qualquer mudança nas 7 tabelas (ou em profiles) dispara reload.
+  // O callback é chamado uma única vez por janela de 250ms — agrupa rajadas.
+  BMStore.subscribe(async () => {
+    try {
+      const myUserId = DB && DB.currentUser;
+      const fresh = await BMStore.load();
+      DB = { ...fresh, currentUser: myUserId };
+      render();
+    } catch (e) { console.warn('[Realtime] reload falhou:', e && e.message); }
   });
 
   // Reage a sign-out em outras abas ou expiração de token
