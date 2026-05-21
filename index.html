@@ -1105,19 +1105,29 @@ async function mfaChallenge(factorId) {
    devolvemos o id (uuid string). Sem mutação local — profiles é a fonte. */
 async function syncCurrentUserFromAuth(authUser) {
   if (!authUser || !authUser.id) return null;
-  const entry = DB.usuarios.find(x => x.id === authUser.id);
+  let entry = DB.usuarios.find(x => x.id === authUser.id);
+  if (!entry && SB) {
+    // Fallback: busca o próprio profile (RLS sempre permite ler o próprio)
+    try {
+      const { data } = await SB.from('profiles')
+        .select('id,email,nome,perfil,setor,ativo').eq('id', authUser.id).maybeSingle();
+      if (data) {
+        entry = { id: data.id, nome: data.nome || data.email, email: data.email,
+                  perfil: data.perfil || 'operador', setor: data.setor || '',
+                  ativo: data.ativo !== false };
+        if (!DB.usuarios.find(x => x.id === entry.id)) DB.usuarios.push(entry);
+      }
+    } catch (e) { console.warn('[sync] fallback profile:', e.message); }
+  }
   if (!entry) {
-    // Sessão válida mas sem profile: o trigger on_auth_user_created deveria
-    // ter criado um. Pode ser que ainda não tenha replicado ou a conta foi
-    // desativada/removida. Não conseguimos seguir.
-    toast('Sua conta não está provisionada no app. Contate a Diretoria.', 'error');
+    toast('Sua conta não está provisionada. Contate a Diretoria.', 'error');
     return null;
   }
   if (entry.ativo === false) {
     toast('Sua conta está desativada. Contate a Diretoria.', 'error');
     return null;
   }
-  return entry.id;  // uuid string
+  return entry.id;
 }
 
 /* --- TOPBAR --- */
