@@ -3073,12 +3073,48 @@ function openCadUser() {
       }
       return;
     }
-    // Não existe: precisa ser criado no Supabase Auth primeiro.
-    toast(
-      'Para CRIAR um novo usuário, vá no painel Supabase (Authentication → Add user → Send invitation). ' +
-      'Depois volte aqui e edite perfil/nome/setor.',
-      'error'
-    );
+    // Não existe: chama a Edge Function `criar-usuario` (server-side, com service_role).
+    if (!SB) return toast('Supabase indisponível', 'error');
+    if (u.perfil !== 'diretoria') return toast('Apenas a Diretoria pode criar usuários.', 'error');
+    if (!email || !nome) return toast('Preencha nome e e-mail.', 'error');
+    // Gera senha temporária forte (16 chars: maiúsc + minúsc + dígito + símbolo)
+    const senha = (() => {
+      const A='ABCDEFGHJKLMNPQRSTUVWXYZ', a='abcdefghijkmnpqrstuvwxyz', d='23456789', s='!@#$%&*';
+      const all = A+a+d+s;
+      const pick = (set) => set[Math.floor(Math.random()*set.length)];
+      let p = pick(A)+pick(a)+pick(d)+pick(s);
+      for (let i=0;i<12;i++) p += pick(all);
+      return p.split('').sort(()=>Math.random()-0.5).join('');
+    })();
+    try {
+      const { data, error } = await SB.functions.invoke('criar-usuario', {
+        body: { email, nome, perfil, setor, senha }
+      });
+      if (error) throw error;
+      if (data && data.error) throw new Error(data.error);
+      node.remove();
+      // Mostra a senha gerada num modal pra Diretoria copiar e passar pro usuário
+      const m = document.createElement('div');
+      m.className = 'modal-backdrop';
+      m.innerHTML = `
+        <div class="modal" onclick="event.stopPropagation()" style="max-width:420px;text-align:center;">
+          <h2 style="margin:0 0 10px;">Usuário criado ✓</h2>
+          <p style="margin:6px 0;"><b>${escapeHtml(nome)}</b><br><span style="color:var(--muted);font-size:13px;">${escapeHtml(email)}</span></p>
+          <p style="margin:14px 0 6px;font-size:13px;color:var(--muted);">Senha temporária — copie e passe pelo WhatsApp. O usuário deve trocar no primeiro login.</p>
+          <input id="tmp-pwd" readonly value="${escapeHtml(senha)}" style="width:100%;text-align:center;font-family:monospace;font-size:16px;padding:10px;border:2px dashed var(--brand-navy);border-radius:8px;background:#fff;">
+          <div style="display:flex;gap:8px;justify-content:center;margin-top:14px;">
+            <button class="btn" id="tmp-copy" style="width:auto;padding:8px 16px;">Copiar senha</button>
+            <button class="btn secondary" id="tmp-ok" style="width:auto;padding:8px 16px;">Fechar</button>
+          </div>
+        </div>`;
+      document.body.appendChild(m);
+      m.querySelector('#tmp-copy').onclick = async () => {
+        try { await navigator.clipboard.writeText(senha); toast('Senha copiada', 'success'); } catch { m.querySelector('#tmp-pwd').select(); document.execCommand('copy'); toast('Senha copiada', 'success'); }
+      };
+      m.querySelector('#tmp-ok').onclick = () => { m.remove(); openCadUser(); };
+    } catch (err) {
+      toast('Erro ao criar usuário: ' + (err.message || ''), 'error');
+    }
   });
 }
 
