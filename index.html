@@ -3150,9 +3150,10 @@ function openCadUser() {
                   <div class="subtitle" style="font-size:11px;">${x.whatsapp ? '📱 ' + escapeHtml(whatsFormatar(x.whatsapp)) : '<span style="color:var(--danger);">⚠ sem WhatsApp cadastrado</span>'}</div>
                   ${temBens ? `<div style="font-size:11px; color:var(--warning); margin-top:2px;">🔒 Possui bens sob custódia</div>` : ''}
                 </div>
-                <div style="display:flex;gap:6px;flex-shrink:0;">
+                <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">
+                  <button class="btn secondary" data-edit="${x.id}" style="width:auto; padding:6px 10px; font-size:12px;" title="Editar usuário">✏️</button>
                   <button class="btn secondary" data-pw="${x.id}" style="width:auto; padding:6px 10px; font-size:12px;" title="Trocar senha">🔑</button>
-                  ${remov ? `<button class="btn danger" data-del="${x.id}" style="width:auto; padding:6px 10px; font-size:12px;">Excluir</button>` : ''}
+                  ${remov ? `<button class="btn danger" data-del="${x.id}" style="width:auto; padding:6px 10px; font-size:12px;" title="Desativar usuário">🚫</button>` : ''}
                 </div>
               </div>
             `;
@@ -3194,17 +3195,32 @@ function openCadUser() {
   node.addEventListener('click', e => { if (e.target === node) node.remove(); });
   node.querySelector('[data-close]').addEventListener('click', () => node.remove());
 
+  // Editar usuário
+  node.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => {
+    const targetId = b.dataset.edit;
+    const target = Lookup.user(targetId);
+    if (!target) return;
+    node.remove();
+    openEditUser(target);
+  }));
+
+  // Desativar usuário (NÃO é exclusão definitiva — exibe explicação)
   node.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
     const targetId = b.dataset.del;            // uuid (string)
     const target = Lookup.user(targetId);
     if (!target) return;
     if (Lookup.hasItemsUnderCustody(targetId)) {
-      return toast('Não é possível excluir: usuário possui bens sob custódia', 'error');
+      return toast('Não dá pra desativar: este usuário tem bens sob custódia. Transfira os itens primeiro.', 'error');
     }
     if (!confirm(
       `Desativar o usuário ${target.nome}?\n\n` +
-      `O login será impedido marcando o perfil como inativo. ` +
-      `Para REMOVER definitivamente, exclua também no painel do Supabase (Authentication → Users).`
+      `🔒 O acesso ao app será BLOQUEADO imediatamente.\n\n` +
+      `📋 O nome dele continuará aparecendo no histórico de patrimônios e movimentações ` +
+      `(isso é proposital — preserva auditoria).\n\n` +
+      `❗ Por que não "excluir definitivamente"?\n` +
+      `   Apagar a pessoa quebraria o histórico (não saberíamos quem cadastrou cada item). ` +
+      `Por isso só "desativamos". Mesmo pelo painel do Supabase a exclusão falha pelo mesmo motivo.\n\n` +
+      `Confirmar desativação?`
     )) return;
     // Desativa o perfil no banco (RLS só permite a Diretoria)
     if (SB && u.perfil === 'diretoria') {
@@ -3362,6 +3378,95 @@ function openCadUser() {
       m.querySelector('#tmp-ok').onclick = () => { m.remove(); openCadUser(); };
     } catch (err) {
       toast('Erro ao criar usuário: ' + (err.message || ''), 'error');
+    }
+  });
+}
+
+/* ============== EDITAR USUÁRIO EXISTENTE ============== */
+function openEditUser(target) {
+  const u = Lookup.user(DB.currentUser);
+  if (!Perms.isAdmin(u)) return toast('Apenas administradores podem editar usuários', 'error');
+  const isDir = Perms.isDiretoria(u);
+  const isSelf = target.id === u.id;
+
+  // Perfis que o usuário atual pode atribuir
+  const perfisDisp =
+    isDir ? [['operador','Operador Obra'],['operador_ti','Operador TI'],['admin_ti','Administrador TI'],['admin_obras','Administrador Obras'],['diretoria','Diretoria']] :
+    u.perfil === 'admin_ti'    ? [['operador_ti','Operador TI']] :
+    u.perfil === 'admin_obras' ? [['operador','Operador Obra']] : [];
+
+  // Bloqueio: admin não-Diretoria só edita operadores da própria área
+  if (!isDir && !isSelf) {
+    if (u.perfil === 'admin_ti'    && target.perfil !== 'operador_ti') return toast('Adm. TI só pode editar Operadores TI', 'error');
+    if (u.perfil === 'admin_obras' && target.perfil !== 'operador')    return toast('Adm. Obras só pode editar Operadores Obra', 'error');
+  }
+
+  const html = `
+    <div class="modal-backdrop" id="modal-edu">
+      <div class="modal" onclick="event.stopPropagation()">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border);">
+          <button class="btn secondary" data-close style="width:auto;padding:6px 14px;font-size:13px;">← Voltar</button>
+          <h2 style="margin:0;font-size:18px;">Editar usuário</h2>
+        </div>
+        <form id="edu-form">
+          <div class="form-group"><label>Nome</label>
+            <input type="text" id="edu-nome" required value="${escapeHtml(target.nome || '')}"></div>
+          <div class="form-group"><label>E-mail</label>
+            <input type="email" id="edu-email" disabled value="${escapeHtml(target.email || '')}" style="background:#f3f4f6;color:#6b7280;">
+            <div class="form-help">E-mail não pode ser alterado. Para trocar, crie um novo usuário e desative o antigo.</div>
+          </div>
+          <div class="form-group"><label>Setor</label>
+            <input type="text" id="edu-setor" value="${escapeHtml(target.setor || '')}"></div>
+          <div class="form-group">
+            <label>WhatsApp <span style="color:var(--danger);">*</span></label>
+            <input type="tel" id="edu-whats" required value="${escapeHtml(whatsFormatar(target.whatsapp || ''))}" placeholder="+55 (11) 99999-9999" inputmode="tel">
+            <div class="form-help">Obrigatório. Receberá todas as notificações do app.</div>
+          </div>
+          <div class="form-group">
+            <label>Perfil ${isDir ? '' : '<span style="color:var(--muted);font-size:11px;font-weight:normal;">(só Diretoria altera)</span>'}</label>
+            <select id="edu-perfil" ${isDir ? '' : 'disabled style="background:#f3f4f6;color:#6b7280;"'}>
+              ${perfisDisp.map(([v,l]) => `<option value="${v}" ${target.perfil===v?'selected':''}>${l}</option>`).join('')}
+              ${!perfisDisp.find(([v]) => v === target.perfil) ? `<option value="${target.perfil}" selected>${Perms.perfilLabel(target.perfil)}</option>` : ''}
+            </select>
+          </div>
+          <button class="btn">💾 Salvar alterações</button>
+        </form>
+      </div>
+    </div>`;
+  const wrap = document.createElement('div'); wrap.innerHTML = html;
+  const node = wrap.firstElementChild; document.body.appendChild(node);
+  node.addEventListener('click', e => { if (e.target === node) { node.remove(); openCadUser(); } });
+  node.querySelector('[data-close]').addEventListener('click', () => { node.remove(); openCadUser(); });
+
+  // Máscara WhatsApp
+  const whatsInput = node.querySelector('#edu-whats');
+  whatsInput.addEventListener('input', () => {
+    whatsInput.value = whatsFormatar(whatsInput.value);
+    try { whatsInput.setSelectionRange(whatsInput.value.length, whatsInput.value.length); } catch {}
+  });
+
+  node.querySelector('#edu-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (!SB) return toast('Supabase indisponível', 'error');
+    const nome  = node.querySelector('#edu-nome').value.trim();
+    const setor = node.querySelector('#edu-setor').value.trim();
+    const perfil = isDir ? node.querySelector('#edu-perfil').value : target.perfil;
+    const whatsRaw = (node.querySelector('#edu-whats').value || '').trim();
+    const whatsapp = whatsNormalizar(whatsRaw);
+    if (!nome) return toast('Nome é obrigatório', 'error');
+    if (!whatsapp) return toast('WhatsApp inválido. Use +55 (DDD) número.', 'error');
+
+    // Atualiza no banco
+    try {
+      const updates = { nome, setor: setor || null, whatsapp, updated_at: new Date().toISOString() };
+      if (isDir) updates.perfil = perfil;
+      const { error } = await SB.from('profiles').update(updates).eq('id', target.id);
+      if (error) throw error;
+      node.remove();
+      toast('Usuário atualizado', 'success');
+      openCadUser();
+    } catch (err) {
+      toast('Erro ao atualizar: ' + (err.message || ''), 'error');
     }
   });
 }
