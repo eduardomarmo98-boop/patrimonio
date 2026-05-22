@@ -603,7 +603,7 @@ const BMStore = {
     }
     try {
       const [profs, cats, subs, locs, swts, patrs, movs, invs] = await Promise.all([
-        SB.from('profiles').select('id,email,nome,perfil,setor,ativo').order('email'),
+        SB.from('profiles').select('id,email,nome,perfil,setor,ativo,whatsapp').order('email'),
         SB.from('categorias').select('*').order('id'),
         SB.from('subcategorias').select('*').order('id'),
         SB.from('localizacoes').select('*').order('id'),
@@ -619,7 +619,8 @@ const BMStore = {
         usuarios: (profs.data || []).map(p => ({
           id: p.id, nome: p.nome || p.email, email: p.email,
           perfil: p.perfil || 'operador', setor: p.setor || '',
-          ativo: p.ativo !== false
+          ativo: p.ativo !== false,
+          whatsapp: p.whatsapp || ''
         })),
         categorias: (cats.data || []).map(c => ({ id: c.id, nome: c.nome, icone: c.icone })),
         subcategorias: (subs.data || []).map(s => ({ id: s.id, nome: s.nome, categoriaId: s.categoria_id })),
@@ -801,19 +802,90 @@ function toast(msg, kind='') {
 
 /* ============== NOTIFICAÇÕES WHATSAPP (Evolution API via Edge Function) ============== */
 /* Fire-and-forget: nunca quebra a UX do app se o WhatsApp falhar.
-   A Edge Function `notificar-whatsapp` é quem fala com a Evolution API. */
-async function notificarWhatsApp(evento, dados) {
+   A Edge Function `notificar-whatsapp` é quem fala com a Evolution API.
+
+   Uso:
+     notificarWhatsApp('evento', { dados }, ['uuid1','uuid2'])
+   Também aceita números prontos no array (formato 55DDDNNNNNNNN).
+   Se destinatarios vier vazio, a Edge Function cai no WHATSAPP_TEST_NUMBER. */
+async function notificarWhatsApp(evento, dados, destinatarios) {
   if (!SB) return;
   try {
-    const { data, error } = await SB.functions.invoke('notificar-whatsapp', {
-      body: { evento, dados }
-    });
+    const body = { evento, dados };
+    if (Array.isArray(destinatarios) && destinatarios.length) {
+      // dedup + filtra nulos/vazios
+      body.destinatarios = Array.from(new Set(destinatarios.filter(Boolean)));
+    }
+    const { data, error } = await SB.functions.invoke('notificar-whatsapp', { body });
     if (error) console.warn('[whatsapp] invoke erro:', error);
-    else if (data && data.whatsapp_error) console.warn('[whatsapp] envio falhou:', data.whatsapp_error);
-    else console.log('[whatsapp] enviado:', data);
+    else if (data && data.error) console.warn('[whatsapp] erro:', data.error);
+    else console.log('[whatsapp] ✓', evento, data);
   } catch (e) {
     console.warn('[whatsapp] exceção:', e);
   }
+}
+
+/* Helpers de destinatários — devolvem UUIDs únicos de usuários ativos.
+   A Edge Function resolve UUID → número usando service_role. */
+const WhatsDest = {
+  diretoria() {
+    return DB.usuarios.filter(u => u.ativo !== false && u.perfil === 'diretoria').map(u => u.id);
+  },
+  // Admins de uma categoria (quem pode aprovar) — inclui Diretoria sempre.
+  aprovadoresDaCategoria(catId) {
+    return DB.usuarios.filter(u => {
+      if (u.ativo === false) return false;
+      if (u.perfil === 'diretoria') return true;
+      if (u.perfil === 'admin_ti'    && (catId === 2 || catId === 3)) return true;
+      if (u.perfil === 'admin_obras' && catId === 1) return true;
+      return false;
+    }).map(u => u.id);
+  },
+  // Envolvidos no patrimônio: criador + responsável atual (sem duplicar).
+  envolvidos(p) {
+    const out = new Set();
+    if (p.criadoPor)           out.add(p.criadoPor);
+    if (p.responsavelAtualId)  out.add(p.responsavelAtualId);
+    if (p.solicitadoPor)       out.add(p.solicitadoPor);
+    if (p.solicitadoMovPor)    out.add(p.solicitadoMovPor);
+    return Array.from(out);
+  },
+  // Para movimentação: solicitante + responsável atual + novo responsável
+  movimentacao(p, novoRespId) {
+    const out = new Set();
+    if (p.criadoPor)          out.add(p.criadoPor);
+    if (p.responsavelAtualId) out.add(p.responsavelAtualId);
+    if (p.solicitadoMovPor)   out.add(p.solicitadoMovPor);
+    if (novoRespId)           out.add(novoRespId);
+    return Array.from(out);
+  },
+  // Lista única com Diretoria + envolvidos
+  diretoriaMais(...ids) {
+    const out = new Set(this.diretoria());
+    for (const i of ids.flat()) if (i) out.add(i);
+    return Array.from(out);
+  }
+};
+
+/* Máscara/validação de número WhatsApp brasileiro. */
+function whatsLimpar(v) { return String(v || '').replace(/\D/g, ''); }
+function whatsValidar(v) {
+  const d = whatsLimpar(v);
+  return d.length === 12 || d.length === 13; // 55 + DDD + 8 ou 9 dígitos
+}
+function whatsNormalizar(v) {
+  let d = whatsLimpar(v);
+  if (d.length === 10 || d.length === 11) d = '55' + d;
+  return whatsValidar(d) ? d : null;
+}
+function whatsFormatar(v) {
+  const d = whatsLimpar(v);
+  if (d.length < 3) return d;
+  // 55 (DD) 9XXXX-XXXX
+  if (d.length <= 4)  return '+' + d.slice(0,2) + ' (' + d.slice(2) + ')';
+  if (d.length <= 9)  return '+' + d.slice(0,2) + ' (' + d.slice(2,4) + ') ' + d.slice(4);
+  if (d.length <= 12) return '+' + d.slice(0,2) + ' (' + d.slice(2,4) + ') ' + d.slice(4,8) + '-' + d.slice(8);
+  return '+' + d.slice(0,2) + ' (' + d.slice(2,4) + ') ' + d.slice(4,9) + '-' + d.slice(9,13);
 }
 
 /* ============== AUTH & PERMISSIONS ============== */
@@ -1761,6 +1833,14 @@ function openMove(patrimonioId) {
         destinoLocalId: novoLocal, destinoRespId: novoResp
       });
       save();
+      notificarWhatsApp('movimentacao_solicitada', {
+        codigo: p.codigoBarras, descricao: p.descricao,
+        respAtual: (Lookup.user(p.responsavelAtualId) || {}).nome,
+        respNovo:  (Lookup.user(novoResp) || {}).nome,
+        localizacaoNova: ((DB.localizacoes||[]).find(l => l.id === novoLocal) || {}).nome,
+        motivo,
+        solicitadoPor: u.nome
+      }, WhatsDest.aprovadoresDaCategoria(p.categoriaId).concat([u.id]));
       node.remove();
       toast('Solicitação enviada — aguardando aprovação do administrador', 'success');
       render();
@@ -1774,11 +1854,26 @@ function openMove(patrimonioId) {
       motivo: motivo || 'Movimentação registrada',
       destinoLocalId: novoLocal, destinoRespId: novoResp
     });
+    const respAntes = p.responsavelAtualId;
     if (novoLocal) p.localizacaoAtualId = novoLocal;
     if (novoResp)  p.responsavelAtualId = novoResp;
     p.status = 'aguardando_aceite';
     p.atualizadoEm = new Date().toISOString();
     save();
+    // Movimentação direta (admin/diretoria) — avisa partes envolvidas + pede aceite ao destino
+    notificarWhatsApp('movimentacao_aprovada', {
+      codigo: p.codigoBarras, descricao: p.descricao,
+      respNovo: (Lookup.user(novoResp) || {}).nome,
+      localizacaoNova: ((DB.localizacoes||[]).find(l => l.id === novoLocal) || {}).nome,
+      aprovadoPor: u.nome
+    }, [respAntes, novoResp, u.id].filter(Boolean));
+    if (novoResp) {
+      notificarWhatsApp('recebimento_pendente', {
+        codigo: p.codigoBarras, descricao: p.descricao,
+        localizacao: ((DB.localizacoes||[]).find(l => l.id === novoLocal) || {}).nome,
+        enviadoPor: u.nome
+      }, [novoResp]);
+    }
     node.remove();
     toast('Movimentação registrada — aguardando aceite do destinatário', 'success');
     render();
@@ -1817,6 +1912,10 @@ function acceptReceipt(patrimonioId) {
     usuarioId: u.id, motivo: 'Recebimento confirmado pelo destinatário'
   });
   save();
+  notificarWhatsApp('recebimento_aceito', {
+    codigo: p.codigoBarras, descricao: p.descricao,
+    responsavel: u.nome
+  }, WhatsDest.envolvidos(p).concat(WhatsDest.diretoria()));
   toast('Recebimento confirmado', 'success');
   render();
 }
@@ -1888,6 +1987,20 @@ function approveCadastro(patrimonioId) {
     usuarioId: u.id, motivo: isSoft ? 'Licença aprovada e ativada' : 'Cadastro aprovado'
   });
   save();
+  notificarWhatsApp('cadastro_aprovado', {
+    codigo: p.codigoBarras, descricao: p.descricao,
+    responsavel: (Lookup.user(p.responsavelAtualId) || {}).nome,
+    aprovadoPor: u.nome,
+    isSoftware: isSoft
+  }, [p.criadoPor, p.responsavelAtualId].filter(Boolean));
+  // Aviso ao responsável que precisa aceitar (hardware)
+  if (!isSoft && p.responsavelAtualId && p.responsavelAtualId !== p.criadoPor) {
+    notificarWhatsApp('recebimento_pendente', {
+      codigo: p.codigoBarras, descricao: p.descricao,
+      localizacao: ((DB.localizacoes||[]).find(l => l.id === p.localizacaoAtualId) || {}).nome,
+      enviadoPor: u.nome
+    }, [p.responsavelAtualId]);
+  }
   toast(isSoft ? 'Licença aprovada e ativada' : 'Cadastro aprovado — aguardando aceite do responsável', 'success');
   render();
 }
@@ -1896,6 +2009,10 @@ function rejectCadastro(patrimonioId) {
   const u = Lookup.user(DB.currentUser);
   if (!p || p.status !== 'aguardando_aprovacao_cadastro') return;
   if (!Perms.canApproveCadastro(u, p.categoriaId)) return toast('Sem permissão para rejeitar', 'error');
+  notificarWhatsApp('cadastro_rejeitado', {
+    codigo: p.codigoBarras, descricao: p.descricao,
+    rejeitadoPor: u.nome
+  }, [p.criadoPor].filter(Boolean));
   DB.patrimonios = DB.patrimonios.filter(x => x.id !== p.id);
   DB.movimentacoes = DB.movimentacoes.filter(m => m.patrimonioId !== p.id);
   save(); toast('Cadastro rejeitado e removido', 'success'); render();
@@ -1909,6 +2026,8 @@ function approveMove(patrimonioId) {
   const m = p.pendingMove || {};
   const novoLocal = m.localizacaoAtualId || null;
   const novoResp  = m.responsavelAtualId || null;
+  const respAnterior = p.responsavelAtualId;
+  const solicitanteId = p.solicitadoMovPor;
   if (novoLocal) p.localizacaoAtualId = novoLocal;
   if (novoResp)  p.responsavelAtualId = novoResp;
   p.status = 'aguardando_aceite';
@@ -1925,6 +2044,20 @@ function approveMove(patrimonioId) {
     destinoLocalId: novoLocal, destinoRespId: novoResp
   });
   save();
+  notificarWhatsApp('movimentacao_aprovada', {
+    codigo: p.codigoBarras, descricao: p.descricao,
+    respNovo: (Lookup.user(novoResp) || {}).nome,
+    localizacaoNova: ((DB.localizacoes||[]).find(l => l.id === novoLocal) || {}).nome,
+    aprovadoPor: u.nome
+  }, [solicitanteId, respAnterior, novoResp].filter(Boolean));
+  // Aviso direto ao novo responsável: precisa aceitar
+  if (novoResp) {
+    notificarWhatsApp('recebimento_pendente', {
+      codigo: p.codigoBarras, descricao: p.descricao,
+      localizacao: ((DB.localizacoes||[]).find(l => l.id === novoLocal) || {}).nome,
+      enviadoPor: u.nome
+    }, [novoResp]);
+  }
   toast('Movimentação aprovada — aguardando aceite do destinatário', 'success');
   render();
 }
@@ -1935,6 +2068,7 @@ function rejectMove(patrimonioId) {
   if (!p || p.status !== 'aguardando_aprovacao_movimentacao') return;
   if (!Perms.canApproveCadastro(u, p.categoriaId)) return toast('Sem permissão para rejeitar', 'error');
   p.status = p.statusBeforePending || 'ativo';
+  const motivoMov = (p.pendingMove && p.pendingMove.motivo) || '';
   delete p.pendingMove;
   delete p.statusBeforePending;
   const solId = p.solicitadoMovPor; delete p.solicitadoMovPor;
@@ -1944,6 +2078,11 @@ function rejectMove(patrimonioId) {
     usuarioId: u.id, motivo: 'Movimentação rejeitada'
   });
   save();
+  notificarWhatsApp('movimentacao_rejeitada', {
+    codigo: p.codigoBarras, descricao: p.descricao,
+    motivo: motivoMov,
+    rejeitadoPor: u.nome
+  }, [solId].filter(Boolean));
   toast('Movimentação rejeitada', 'success');
   render();
 }
@@ -1966,7 +2105,12 @@ function requestBaixa(patrimonioId, tipo) {
       data: new Date().toISOString(), usuarioId: u.id,
       motivo: tipo === 'baixa' ? 'Baixa do patrimônio (Diretoria)' : 'Item extraviado (Diretoria)'
     });
-    save(); toast(`${label.charAt(0).toUpperCase()+label.slice(1)} efetivada`, 'success'); render(); return;
+    save();
+    notificarWhatsApp(tipo === 'baixa' ? 'baixa_aprovada' : 'extravio_aprovado', {
+      codigo: p.codigoBarras, descricao: p.descricao,
+      aprovadoPor: u.nome
+    }, WhatsDest.diretoriaMais(p.responsavelAtualId, p.criadoPor));
+    toast(`${label.charAt(0).toUpperCase()+label.slice(1)} efetivada`, 'success'); render(); return;
   }
   const motivo = prompt(`Motivo da solicitação de ${label}:`, '');
   if (motivo === null) return;
@@ -1979,7 +2123,14 @@ function requestBaixa(patrimonioId, tipo) {
     data: new Date().toISOString(), usuarioId: u.id,
     motivo: motivo || `Solicitação de ${label}`
   });
-  save(); toast(`Solicitação de ${label} enviada à Diretoria`, 'success'); render();
+  save();
+  notificarWhatsApp(tipo === 'baixa' ? 'baixa_solicitada' : 'extravio_solicitado', {
+    codigo: p.codigoBarras, descricao: p.descricao,
+    responsavel: (Lookup.user(p.responsavelAtualId) || {}).nome,
+    motivo,
+    solicitadoPor: u.nome
+  }, WhatsDest.diretoriaMais(u.id, p.responsavelAtualId));
+  toast(`Solicitação de ${label} enviada à Diretoria`, 'success'); render();
 }
 function approveBaixa(patrimonioId) {
   const p = DB.patrimonios.find(x => x.id === patrimonioId);
@@ -1989,6 +2140,7 @@ function approveBaixa(patrimonioId) {
   const isBaixa = p.status === 'aguardando_aprovacao_baixa';
   const isExtr  = p.status === 'aguardando_aprovacao_extravio';
   if (!isBaixa && !isExtr) return;
+  const solicitanteId = p.solicitadoPor;
   p.status = isBaixa ? 'baixado' : 'extraviado';
   p.aprovadoPor = u.id; p.aprovadoEm = new Date().toISOString();
   DB.movimentacoes.push({
@@ -1997,7 +2149,12 @@ function approveBaixa(patrimonioId) {
     data: new Date().toISOString(), usuarioId: u.id,
     motivo: isBaixa ? 'Baixa aprovada pela Diretoria' : 'Extravio aprovado pela Diretoria'
   });
-  save(); toast(`${isBaixa ? 'Baixa' : 'Extravio'} aprovado`, 'success'); render();
+  save();
+  notificarWhatsApp(isBaixa ? 'baixa_aprovada' : 'extravio_aprovado', {
+    codigo: p.codigoBarras, descricao: p.descricao,
+    aprovadoPor: u.nome
+  }, [solicitanteId, p.responsavelAtualId, p.criadoPor].filter(Boolean));
+  toast(`${isBaixa ? 'Baixa' : 'Extravio'} aprovado`, 'success'); render();
 }
 function rejectBaixa(patrimonioId) {
   const p = DB.patrimonios.find(x => x.id === patrimonioId);
@@ -2007,6 +2164,7 @@ function rejectBaixa(patrimonioId) {
   const isBaixa = p.status === 'aguardando_aprovacao_baixa';
   const isExtr  = p.status === 'aguardando_aprovacao_extravio';
   if (!isBaixa && !isExtr) return;
+  const solicitanteId = p.solicitadoPor;
   p.status = p.statusAnterior || 'ativo';
   delete p.statusAnterior; delete p.solicitadoPor; delete p.solicitadoEm; delete p.solicitacaoMotivo;
   DB.movimentacoes.push({
@@ -2015,7 +2173,12 @@ function rejectBaixa(patrimonioId) {
     data: new Date().toISOString(), usuarioId: u.id,
     motivo: isBaixa ? 'Baixa rejeitada pela Diretoria' : 'Extravio rejeitado pela Diretoria'
   });
-  save(); toast('Solicitação rejeitada', 'success'); render();
+  save();
+  notificarWhatsApp(isBaixa ? 'baixa_rejeitada' : 'extravio_rejeitado', {
+    codigo: p.codigoBarras, descricao: p.descricao,
+    rejeitadoPor: u.nome
+  }, [solicitanteId, p.responsavelAtualId].filter(Boolean));
+  toast('Solicitação rejeitada', 'success'); render();
 }
 
 function deletePatrimonio(patrimonioId) {
@@ -2299,7 +2462,10 @@ function bindCreate() {
         motivo: isOperador ? 'Solicitação de cadastro de licença — aguardando aprovação' : 'Licença cadastrada'
       });
       save();
-      notificarWhatsApp('patrimonio_cadastrado', {
+      const destSw = isOperador
+        ? WhatsDest.aprovadoresDaCategoria(3).concat([u.id])
+        : WhatsDest.diretoriaMais(u.id);
+      notificarWhatsApp(isOperador ? 'patrimonio_solicitado' : 'patrimonio_cadastrado', {
         codigo: sw.codigoBarras,
         descricao: sw.descricao,
         categoria: 'TI - Softwares',
@@ -2308,7 +2474,7 @@ function bindCreate() {
         valor: sw.valorAquisicao,
         criadoPor: u.nome,
         aguardandoAprovacao: isOperador,
-      });
+      }, destSw);
       toast(
         isOperador
           ? 'Solicitação enviada — aguardando aprovação do administrador'
@@ -2358,7 +2524,13 @@ function bindCreate() {
       destinoLocalId: novo.localizacaoAtualId, destinoRespId: novo.responsavelAtualId
     });
     save();
-    notificarWhatsApp('patrimonio_cadastrado', {
+    // Destinatários:
+    //  - Aguardando aprovação: aprovadores da categoria (Diretoria + admin)
+    //  - Cadastro direto (admin/diretoria): responsável atual (precisa aceitar)
+    const destCad = isOperador
+      ? WhatsDest.aprovadoresDaCategoria(novo.categoriaId).concat([u.id])
+      : [novo.responsavelAtualId, u.id].filter(Boolean);
+    notificarWhatsApp(isOperador ? 'patrimonio_solicitado' : 'patrimonio_cadastrado', {
       codigo: novo.codigoBarras,
       descricao: novo.descricao,
       categoria: ((DB.categorias||[]).find(c => c.id === novo.categoriaId) || {}).nome,
@@ -2368,7 +2540,7 @@ function bindCreate() {
       valor: novo.valorAquisicao,
       criadoPor: u.nome,
       aguardandoAprovacao: isOperador,
-    });
+    }, destCad);
     toast(
       isOperador
         ? 'Solicitação enviada — aguardando aprovação do administrador'
@@ -2569,6 +2741,16 @@ function openInventoryStart() {
   node.querySelector('#inv-go').addEventListener('click', () => {
     const locId = parseInt(node.querySelector('#inv-loc').value);
     inventoryState = { locId, lidos: new Set(), inicio: new Date().toISOString() };
+    const me = Lookup.user(DB.currentUser);
+    const loc = Lookup.loc(locId);
+    const esperados = DB.patrimonios.filter(p => p.localizacaoAtualId === locId);
+    // Notifica responsáveis dos itens do local + Diretoria
+    const respIds = new Set(esperados.map(p => p.responsavelAtualId).filter(Boolean));
+    notificarWhatsApp('inventario_iniciado', {
+      local: (loc || {}).nome,
+      esperados: esperados.length,
+      iniciadoPor: me ? me.nome : '—'
+    }, WhatsDest.diretoriaMais(Array.from(respIds), me ? me.id : null));
     node.remove();
     openInventoryRunning();
   });
@@ -2641,6 +2823,14 @@ function openInventoryRunning() {
       fora: fora.length
     };
     DB.inventarios.push(inv); save();
+    notificarWhatsApp('inventario_finalizado', {
+      local: (Lookup.loc(inv.localizacaoId) || {}).nome,
+      esperados: inv.esperados,
+      lidos: inv.lidos,
+      faltantes: inv.faltantes,
+      fora: inv.fora,
+      finalizadoPor: u.nome
+    }, WhatsDest.diretoriaMais(u.id));
     inventoryState = null;
     node.remove();
     toast('Inventário finalizado', 'success');
@@ -2957,6 +3147,7 @@ function openCadUser() {
                 <div class="item-info">
                   <div class="title">${escapeHtml(x.nome)}</div>
                   <div class="subtitle">${escapeHtml(x.email)} · <span class="role-chip ${x.perfil}">${Perms.perfilLabel(x.perfil)}</span></div>
+                  <div class="subtitle" style="font-size:11px;">${x.whatsapp ? '📱 ' + escapeHtml(whatsFormatar(x.whatsapp)) : '<span style="color:var(--danger);">⚠ sem WhatsApp cadastrado</span>'}</div>
                   ${temBens ? `<div style="font-size:11px; color:var(--warning); margin-top:2px;">🔒 Possui bens sob custódia</div>` : ''}
                 </div>
                 <div style="display:flex;gap:6px;flex-shrink:0;">
@@ -2976,6 +3167,11 @@ function openCadUser() {
           <div class="form-group"><label>Nome</label><input type="text" id="u-nome" required></div>
           <div class="form-group"><label>E-mail</label><input type="email" id="u-email" required></div>
           <div class="form-group"><label>Setor</label><input type="text" id="u-setor"></div>
+          <div class="form-group">
+            <label>WhatsApp <span style="color:var(--danger);">*</span></label>
+            <input type="tel" id="u-whats" required placeholder="+55 (11) 99999-9999" inputmode="tel">
+            <div class="form-help">Obrigatório. Receberá todas as notificações do app.</div>
+          </div>
           <div class="form-group"><label>Perfil</label>
             <select id="u-perfil">
               ${perfisDisp.map(([v,l]) => `<option value="${v}">${l}</option>`).join('')}
@@ -3022,6 +3218,10 @@ function openCadUser() {
       }
     }
     // O DB.usuarios local será recarregado de profiles no próximo load()
+    notificarWhatsApp('usuario_desativado', {
+      nome: target.nome, email: target.email,
+      desativadoPor: u.nome
+    }, WhatsDest.diretoriaMais(targetId));
     node.remove(); toast('Usuário desativado', 'success'); openCadUser();
   }));
 
@@ -3049,10 +3249,25 @@ function openCadUser() {
     try {
       await Auth.updateOwnPassword(senha);
       toast('Senha atualizada', 'success');
+      notificarWhatsApp('senha_alterada', {
+        nome: u.nome,
+        quando: new Date().toISOString()
+      }, [u.id]);
     } catch (err) {
       toast('Erro ao atualizar senha: ' + (err.message || ''), 'error');
     }
   }));
+
+  // Máscara WhatsApp em tempo real
+  const whatsInput = node.querySelector('#u-whats');
+  if (whatsInput) {
+    whatsInput.addEventListener('input', () => {
+      const pos = whatsInput.selectionStart;
+      whatsInput.value = whatsFormatar(whatsInput.value);
+      // Mantém o cursor no fim (simples e robusto)
+      try { whatsInput.setSelectionRange(whatsInput.value.length, whatsInput.value.length); } catch {}
+    });
+  }
 
   // Botão "Gerar senha"
   const genPwd = () => {
@@ -3080,6 +3295,9 @@ function openCadUser() {
     const nome  = node.querySelector('#u-nome').value.trim();
     const setor = node.querySelector('#u-setor').value.trim();
     const perfil = node.querySelector('#u-perfil').value;
+    const whatsRaw = (node.querySelector('#u-whats').value || '').trim();
+    const whatsapp = whatsNormalizar(whatsRaw);
+    if (!whatsapp) return toast('WhatsApp inválido. Use +55 (DDD) número.', 'error');
     const existente = DB.usuarios.find(x => (x.email||'').toLowerCase() === email);
     if (existente) {
       // Atualiza profile do usuário já existente
@@ -3088,7 +3306,7 @@ function openCadUser() {
       }
       try {
         const { error } = await SB.from('profiles')
-          .update({ nome, setor, perfil, ativo: true, updated_at: new Date().toISOString() })
+          .update({ nome, setor, perfil, whatsapp, ativo: true, updated_at: new Date().toISOString() })
           .eq('id', existente.id);
         if (error) throw error;
         node.remove();
@@ -3107,10 +3325,21 @@ function openCadUser() {
     if (senha.length < 6) return toast('Senha precisa ter ao menos 6 caracteres', 'error');
     try {
       const { data, error } = await SB.functions.invoke('criar-usuario', {
-        body: { email, nome, perfil, setor, senha }
+        body: { email, nome, perfil, setor, senha, whatsapp }
       });
       if (error) throw error;
       if (data && data.error) throw new Error(data.error);
+      // Notifica o novo usuário (envio direto pelo número — usuário ainda não está em DB.usuarios)
+      notificarWhatsApp('usuario_criado', {
+        nome, email, senhaTemp: senha
+      }, [whatsapp]);
+      // Avisa a Diretoria
+      notificarWhatsApp('usuario_criado_admin', {
+        nome, email,
+        perfil: Perms.perfilLabel(perfil),
+        setor: setor || '—',
+        criadoPor: u.nome
+      }, WhatsDest.diretoria().filter(id => id !== u.id));
       node.remove();
       // Mostra a senha gerada num modal pra Diretoria copiar e passar pro usuário
       const m = document.createElement('div');
