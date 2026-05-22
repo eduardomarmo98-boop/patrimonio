@@ -867,6 +867,19 @@ const WhatsDest = {
   }
 };
 
+/* ============== CONTAS-MESTRE (proteção contra desativação acidental) ============== */
+/* Lista de e-mails de contas que NÃO podem ser desativadas pelo app, mesmo por
+   outra Diretoria. Também não podem ter o perfil alterado.
+   Nome / setor / WhatsApp continuam editáveis (pelo próprio dono ou Diretoria).
+   Pra excluir de verdade (cenário muito raro, ex: LGPD): só direto no Supabase
+   após zerar todas as FKs — operação manual e consciente. */
+const MASTER_EMAILS = new Set([
+  's.marmo@brandaoemarmo.com.br'
+]);
+function isMaster(user) {
+  return !!(user && user.email && MASTER_EMAILS.has(String(user.email).toLowerCase()));
+}
+
 /* Máscara/validação de número WhatsApp brasileiro. */
 function whatsLimpar(v) { return String(v || '').replace(/\D/g, ''); }
 function whatsValidar(v) {
@@ -3124,6 +3137,7 @@ function openCadUser() {
 
   const podeRemover = (alvo) => {
     if (alvo.id === u.id) return false; // não pode se remover
+    if (isMaster(alvo))   return false; // 🛡️ conta-mestre protegida
     if (Lookup.hasItemsUnderCustody(alvo.id)) return false;
     if (u.perfil === 'diretoria') return true;
     // admin_ti/obras só remove operadores
@@ -3145,9 +3159,10 @@ function openCadUser() {
               <div class="item">
                 <div class="item-icon">👤</div>
                 <div class="item-info">
-                  <div class="title">${escapeHtml(x.nome)}</div>
+                  <div class="title">${escapeHtml(x.nome)} ${isMaster(x) ? '<span title="Conta-mestre protegida" style="font-size:14px;">🛡️</span>' : ''}</div>
                   <div class="subtitle">${escapeHtml(x.email)} · <span class="role-chip ${x.perfil}">${Perms.perfilLabel(x.perfil)}</span></div>
                   <div class="subtitle" style="font-size:11px;">${x.whatsapp ? '📱 ' + escapeHtml(whatsFormatar(x.whatsapp)) : '<span style="color:var(--danger);">⚠ sem WhatsApp cadastrado</span>'}</div>
+                  ${isMaster(x) ? `<div style="font-size:11px; color:var(--brand-navy); margin-top:2px; font-weight:600;">🛡️ Conta-mestre — não pode ser desativada nem ter o perfil alterado</div>` : ''}
                   ${temBens ? `<div style="font-size:11px; color:var(--warning); margin-top:2px;">🔒 Possui bens sob custódia</div>` : ''}
                 </div>
                 <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">
@@ -3212,7 +3227,24 @@ function openCadUser() {
     if (Lookup.hasItemsUnderCustody(targetId)) {
       return toast('Não dá pra desativar: este usuário tem bens sob custódia. Transfira os itens primeiro.', 'error');
     }
-    if (!confirm(
+    // PROTEÇÃO ESPECIAL: desativar uma Diretoria é crítico (perde gestão).
+    // Bloqueia se for a última, exige digitar "CONFIRMO" pras demais.
+    if (target.perfil === 'diretoria') {
+      const diretoresAtivos = DB.usuarios.filter(x => x.perfil === 'diretoria' && x.ativo !== false).length;
+      if (diretoresAtivos <= 1) {
+        return toast('⛔ Não é possível desativar o último usuário Diretoria. O app ficaria sem administrador-raiz.', 'error');
+      }
+      const aviso = prompt(
+        `⚠️ ATENÇÃO — desativar usuário DIRETORIA\n\n` +
+        `Você está prestes a desativar:\n` +
+        `   ${target.nome} (${target.email})\n\n` +
+        `Essa pessoa perde TODO acesso administrativo imediatamente. ` +
+        `Pra reativar depois, só pelo SQL Editor do Supabase.\n\n` +
+        `Pra confirmar, digite CONFIRMO (maiúsculas) abaixo:`,
+        ''
+      );
+      if (aviso !== 'CONFIRMO') return toast('Desativação cancelada.', 'error');
+    } else if (!confirm(
       `Desativar o usuário ${target.nome}?\n\n` +
       `🔒 O acesso ao app será BLOQUEADO imediatamente.\n\n` +
       `📋 O nome dele continuará aparecendo no histórico de patrimônios e movimentações ` +
@@ -3388,6 +3420,7 @@ function openEditUser(target) {
   if (!Perms.isAdmin(u)) return toast('Apenas administradores podem editar usuários', 'error');
   const isDir = Perms.isDiretoria(u);
   const isSelf = target.id === u.id;
+  const targetMaster = isMaster(target);  // 🛡️ conta-mestre = perfil bloqueado
 
   // Perfis que o usuário atual pode atribuir
   const perfisDisp =
@@ -3400,6 +3433,9 @@ function openEditUser(target) {
     if (u.perfil === 'admin_ti'    && target.perfil !== 'operador_ti') return toast('Adm. TI só pode editar Operadores TI', 'error');
     if (u.perfil === 'admin_obras' && target.perfil !== 'operador')    return toast('Adm. Obras só pode editar Operadores Obra', 'error');
   }
+
+  // Conta-mestre: perfil é INALTERÁVEL (mesmo pra outra Diretoria, e mesmo pra ela mesma)
+  const perfilEditavel = isDir && !targetMaster;
 
   const html = `
     <div class="modal-backdrop" id="modal-edu">
@@ -3423,8 +3459,11 @@ function openEditUser(target) {
             <div class="form-help">Obrigatório. Receberá todas as notificações do app.</div>
           </div>
           <div class="form-group">
-            <label>Perfil ${isDir ? '' : '<span style="color:var(--muted);font-size:11px;font-weight:normal;">(só Diretoria altera)</span>'}</label>
-            <select id="edu-perfil" ${isDir ? '' : 'disabled style="background:#f3f4f6;color:#6b7280;"'}>
+            <label>Perfil ${
+              targetMaster ? '<span style="color:var(--brand-navy);font-size:11px;font-weight:normal;">🛡️ (conta-mestre — bloqueado)</span>'
+                           : (isDir ? '' : '<span style="color:var(--muted);font-size:11px;font-weight:normal;">(só Diretoria altera)</span>')
+            }</label>
+            <select id="edu-perfil" ${perfilEditavel ? '' : 'disabled style="background:#f3f4f6;color:#6b7280;"'}>
               ${perfisDisp.map(([v,l]) => `<option value="${v}" ${target.perfil===v?'selected':''}>${l}</option>`).join('')}
               ${!perfisDisp.find(([v]) => v === target.perfil) ? `<option value="${target.perfil}" selected>${Perms.perfilLabel(target.perfil)}</option>` : ''}
             </select>
@@ -3450,7 +3489,7 @@ function openEditUser(target) {
     if (!SB) return toast('Supabase indisponível', 'error');
     const nome  = node.querySelector('#edu-nome').value.trim();
     const setor = node.querySelector('#edu-setor').value.trim();
-    const perfil = isDir ? node.querySelector('#edu-perfil').value : target.perfil;
+    const perfil = perfilEditavel ? node.querySelector('#edu-perfil').value : target.perfil;
     const whatsRaw = (node.querySelector('#edu-whats').value || '').trim();
     const whatsapp = whatsNormalizar(whatsRaw);
     if (!nome) return toast('Nome é obrigatório', 'error');
@@ -3459,7 +3498,7 @@ function openEditUser(target) {
     // Atualiza no banco
     try {
       const updates = { nome, setor: setor || null, whatsapp, updated_at: new Date().toISOString() };
-      if (isDir) updates.perfil = perfil;
+      if (perfilEditavel) updates.perfil = perfil;
       const { error } = await SB.from('profiles').update(updates).eq('id', target.id);
       if (error) throw error;
       node.remove();
