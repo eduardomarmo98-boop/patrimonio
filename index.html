@@ -1425,7 +1425,8 @@ function renderHome() {
               baixa:'Baixa',
               extraviado:'Extraviado',
               inventario:'Inventário',
-              exclusao:'Excluído do app'
+              exclusao:'Excluído do app',
+              rejeicao_cadastro:'Cadastro rejeitado'
             })[m.tipo] || m.tipo;
             const usr = Lookup.user(m.usuarioId);
             return `
@@ -2030,9 +2031,16 @@ function rejectCadastro(patrimonioId) {
     codigo: p.codigoBarras, descricao: p.descricao,
     rejeitadoPor: u.nome
   }, [p.criadoPor].filter(Boolean));
-  DB.patrimonios = DB.patrimonios.filter(x => x.id !== p.id);
-  DB.movimentacoes = DB.movimentacoes.filter(m => m.patrimonioId !== p.id);
-  save(); toast('Cadastro rejeitado e removido', 'success'); render();
+  // Exclusão LÓGICA: o cadastro rejeitado some do app (status 'excluido' é
+  // filtrado em canSee), mas o registro e o histórico ficam no Supabase.
+  p.status = 'excluido';
+  p.atualizadoEm = new Date().toISOString();
+  DB.movimentacoes.push({
+    id: nextId('movimentacoes'), patrimonioId: p.id,
+    tipo: 'rejeicao_cadastro', data: new Date().toISOString(),
+    usuarioId: u.id, motivo: p.solicitacaoMotivo ? ('Cadastro rejeitado — ' + p.solicitacaoMotivo) : 'Cadastro rejeitado pela administração'
+  });
+  save(); toast('Cadastro rejeitado (registro mantido no Supabase)', 'success'); render();
 }
 
 function approveMove(patrimonioId) {
