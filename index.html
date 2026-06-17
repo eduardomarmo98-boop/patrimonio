@@ -993,6 +993,7 @@ const Lookup = {
   },
   canSee(user, p) {
     if (!user || !p) return false;
+    if (p.status === 'excluido') return false; // exclusão lógica: some do app, mas fica no Supabase
     if (user.perfil === 'diretoria') return true;
     if (user.perfil === 'admin_ti')    return p.categoriaId === 2 || p.categoriaId === 3;
     if (user.perfil === 'admin_obras') return p.categoriaId === 1;
@@ -1423,7 +1424,8 @@ function renderHome() {
               aceite_recebimento:'✓ Recebimento confirmado',
               baixa:'Baixa',
               extraviado:'Extraviado',
-              inventario:'Inventário'
+              inventario:'Inventário',
+              exclusao:'Excluído do app'
             })[m.tipo] || m.tipo;
             const usr = Lookup.user(m.usuarioId);
             return `
@@ -1568,7 +1570,8 @@ function statusLabel(s) {
     manutencao:'Manutenção',
     emprestado:'Emprestado',
     baixado:'Baixado',
-    extraviado:'Extraviado'
+    extraviado:'Extraviado',
+    excluido:'Excluído'
   })[s] || s;
 }
 
@@ -1728,7 +1731,7 @@ function openDetail(patrimonioId) {
   if ($a('[data-action="reject-baixa"]'))  $a('[data-action="reject-baixa"]').addEventListener('click', () => { rejectBaixa(p.id); node.remove(); });
   if ($a('[data-action="approve-move"]')) $a('[data-action="approve-move"]').addEventListener('click', () => { approveMove(p.id); node.remove(); });
   if ($a('[data-action="reject-move"]'))  $a('[data-action="reject-move"]').addEventListener('click', () => { rejectMove(p.id); node.remove(); });
-  if ($a('[data-action="delete"]')) $a('[data-action="delete"]').addEventListener('click', () => { if(confirm('Excluir definitivamente este patrimônio? Esta ação não pode ser desfeita.')){ deletePatrimonio(p.id); node.remove(); }});
+  if ($a('[data-action="delete"]')) $a('[data-action="delete"]').addEventListener('click', () => { if(confirm('Excluir este patrimônio? Ele sai do app, mas o registro e o histórico ficam guardados no Supabase.')){ deletePatrimonio(p.id); node.remove(); }});
 }
 
 function renderTimelineEntry(m) {
@@ -2198,10 +2201,20 @@ function rejectBaixa(patrimonioId) {
 function deletePatrimonio(patrimonioId) {
   const u = Lookup.user(DB.currentUser);
   if (!Perms.canDelete(u)) return toast('Apenas a Diretoria pode excluir', 'error');
-  DB.patrimonios = DB.patrimonios.filter(p => p.id !== patrimonioId);
-  DB.movimentacoes = DB.movimentacoes.filter(m => m.patrimonioId !== patrimonioId);
+  const p = DB.patrimonios.find(x => x.id === patrimonioId);
+  if (!p) return;
+  // Exclusão LÓGICA: o item some do app (status 'excluido' é filtrado em canSee),
+  // mas o registro e todo o histórico de movimentações continuam no Supabase.
+  // Não removemos das listas em memória → o sync não dispara DELETE no banco.
+  p.status = 'excluido';
+  p.atualizadoEm = new Date().toISOString();
+  DB.movimentacoes.push({
+    id: nextId('movimentacoes'), patrimonioId: p.id,
+    tipo: 'exclusao', data: new Date().toISOString(),
+    usuarioId: u.id, motivo: 'Excluído do app pela Diretoria — registro preservado'
+  });
   save();
-  toast('Patrimônio excluído', 'success');
+  toast('Patrimônio excluído (registro mantido no Supabase)', 'success');
   render();
 }
 
