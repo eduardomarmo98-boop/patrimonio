@@ -311,9 +311,9 @@
   .login-screen {
     min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
     background:
-      radial-gradient(circle at 18% 12%, rgba(238,126,34,0.06), transparent 42%),
-      radial-gradient(circle at 88% 92%, rgba(27,42,94,0.06), transparent 45%),
-      #eef1f6;
+      radial-gradient(circle at 18% 12%, rgba(238,126,34,0.18), transparent 42%),
+      radial-gradient(circle at 88% 92%, rgba(238,126,34,0.10), transparent 45%),
+      linear-gradient(160deg, #0F1A40 0%, #1B2A5E 55%, #14224d 100%);
   }
 
   .login-card {
@@ -1076,17 +1076,36 @@ function bindLogin() {
 /* ===== MFA (TOTP) para perfis administrativos ===== */
 const ADMIN_PERFIS = ['diretoria','admin_ti','admin_obras'];
 
+// Regra: admins passam pelo 2FA no mínimo 1x por dia (controle por dispositivo).
+const MFA_INTERVALO_MS = 24 * 60 * 60 * 1000; // 24h
+function mfa2faRecente(userId) {
+  try {
+    const t = parseInt(localStorage.getItem('bm_2fa_ultimo_' + userId) || '0', 10);
+    return t > 0 && (Date.now() - t) < MFA_INTERVALO_MS;
+  } catch { return false; }
+}
+function marcar2fa(userId) {
+  try { localStorage.setItem('bm_2fa_ultimo_' + userId, String(Date.now())); } catch {}
+}
+
 async function ensureMfaForAdmins(authUser) {
   if (!SB || !authUser) return true;
   const profile = await Auth.fetchProfile(authUser.id);
   if (!profile || !ADMIN_PERFIS.includes(profile.perfil)) return true;
-  const { data: aal } = await SB.auth.mfa.getAuthenticatorAssuranceLevel();
-  if (aal && aal.currentLevel === 'aal2') return true;
   const { data: factors, error: fe } = await SB.auth.mfa.listFactors();
   if (fe) { toast('Erro MFA: ' + fe.message, 'error'); return false; }
   const totp = (factors.totp || []).find(f => f.status === 'verified');
-  if (totp) return await mfaChallenge(totp.id);
-  return await mfaEnroll();
+  if (totp) {
+    // Mesmo com a sessão já validada, re-exige o 2FA se passou de 24h da última
+    // verificação neste dispositivo (regra: no mínimo 1x por dia).
+    if (mfa2faRecente(authUser.id)) return true;
+    const ok = await mfaChallenge(totp.id);
+    if (ok) marcar2fa(authUser.id);
+    return ok;
+  }
+  const okEnroll = await mfaEnroll();
+  if (okEnroll) marcar2fa(authUser.id);
+  return okEnroll;
 }
 
 function mfaModal(innerHtml) {
