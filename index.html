@@ -748,7 +748,15 @@ const save = () => BMStore.save(DB);
    de id local pra referências antes do upsert chegar ao banco. Em caso de
    colisão, o UPSERT no banco usa esse id; a sequence é mantida coerente
    via setval no script de migração. */
+let _seqId = 0;
 const nextId = (col) => {
+  // patrimonios/movimentacoes: a RLS esconde linhas de outras categorias, então
+  // max(visíveis)+1 pode colidir com um id invisível — o upsert vira UPDATE
+  // numa linha proibida e a RLS recusa ("USING expression"). Por isso geramos
+  // um id grande e único, que não colide com os ids sequenciais existentes.
+  if (col === 'patrimonios' || col === 'movimentacoes') {
+    return Date.now() * 1000 + (_seqId++ % 1000);
+  }
   if (!DB._nextId) DB._nextId = {};
   if (!DB._nextId[col]) {
     const max = (DB[col] || []).reduce((acc, x) => Math.max(acc, x.id || 0), 0);
