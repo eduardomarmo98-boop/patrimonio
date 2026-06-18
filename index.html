@@ -309,75 +309,46 @@
 
   /* ===== LOGIN ===== */
   .login-screen {
-    min-height: 100vh; display: flex; flex-direction: column; justify-content: center; padding: 24px;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
     background:
-      radial-gradient(circle at 18% 12%, rgba(238,126,34,0.20), transparent 42%),
-      radial-gradient(circle at 88% 92%, rgba(238,126,34,0.10), transparent 45%),
-      linear-gradient(160deg, #0F1A40 0%, #1B2A5E 55%, #14224d 100%);
-    position: relative;
-    overflow: hidden;
-  }
-  /* trama sutil que remete a etiquetas/codigo de barras */
-  .login-screen::before {
-    content: ''; position: absolute; inset: 0; pointer-events: none;
-    background-image: repeating-linear-gradient(
-      90deg,
-      rgba(255,255,255,0.05) 0 2px,
-      transparent 2px 7px,
-      rgba(255,255,255,0.025) 7px 9px,
-      transparent 9px 16px
-    );
-    -webkit-mask-image: linear-gradient(180deg, transparent 0%, black 30%, black 70%, transparent 100%);
-            mask-image: linear-gradient(180deg, transparent 0%, black 30%, black 70%, transparent 100%);
-    opacity: 0.55;
-  }
-  .login-screen > * { position: relative; z-index: 1; }
-
-  .login-screen .brand-icon {
-    width: 76px; height: 76px; margin: 0 auto 14px;
-    display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(145deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02));
-    border: 1px solid rgba(255,255,255,0.18);
-    border-radius: 20px;
-    box-shadow: 0 10px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.12);
-  }
-  .login-screen .brand-icon svg { width: 42px; height: 42px; display: block; }
-
-  .login-screen .logo { text-align: center; color: white; margin-bottom: 18px; }
-  .login-screen .logo .brand-mark {
-    font-size: 24px; font-weight: 800; letter-spacing: 2px;
-    display: inline-block; margin-bottom: 6px;
-  }
-  .login-screen .logo .brand-mark .amp { color: var(--brand-orange); }
-  .login-screen .logo .tagline {
-    font-size: 11px; opacity: 0.7; letter-spacing: 2px; font-weight: 600;
-  }
-  .login-screen .pill-wrap { text-align: center; margin-bottom: 24px; }
-  .login-screen .system-pill {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: rgba(255,255,255,0.06);
-    color: rgba(255,255,255,0.92);
-    border: 1px solid rgba(238,126,34,0.45);
-    font-size: 10px; font-weight: 700; letter-spacing: 2.5px;
-    padding: 6px 14px; border-radius: 20px;
-  }
-  .login-screen .system-pill .dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--brand-orange);
-    box-shadow: 0 0 8px rgba(238,126,34,0.85);
+      radial-gradient(circle at 18% 12%, rgba(238,126,34,0.06), transparent 42%),
+      radial-gradient(circle at 88% 92%, rgba(27,42,94,0.06), transparent 45%),
+      #eef1f6;
   }
 
   .login-card {
-    background: white; border-radius: 16px; padding: 26px 22px;
-    box-shadow: 0 20px 50px rgba(0,0,0,.35), 0 2px 6px rgba(0,0,0,.15);
-    border-top: 3px solid var(--brand-orange);
+    width: 100%; max-width: 400px;
+    background: white; border-radius: 18px; padding: 30px 26px;
+    box-shadow: 0 20px 50px rgba(0,0,0,.12), 0 2px 6px rgba(0,0,0,.06);
+    border-top: 4px solid var(--brand-orange);
+    text-align: center;
   }
+
+  .login-screen .brand-icon {
+    width: 76px; height: 76px; margin: 0 auto 14px;
+    border-radius: 18px; overflow: hidden; background: #fff;
+    border: 1px solid var(--border);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+  }
+  .login-screen .brand-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  .login-screen .brand-mark {
+    font-size: 26px; font-weight: 800; letter-spacing: 1px; margin-bottom: 6px;
+  }
+  .login-screen .brand-mark .b1 { color: var(--brand-navy); }
+  .login-screen .brand-mark .b2 { color: var(--brand-orange); }
+
+  .login-screen .system-name { font-size: 14px; color: var(--brand-navy); margin-bottom: 2px; }
+  .login-screen .system-name strong { font-weight: 800; }
+  .login-screen .system-desc { font-size: 12px; color: var(--muted); margin-bottom: 22px; }
+
+  .login-card form { text-align: left; }
   .login-card h2 { margin-bottom: 4px; color: var(--brand-navy); font-size: 20px; }
   .login-card .subtitle { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
 
   .login-screen .footer-mark {
-    text-align: center; margin-top: 20px;
-    color: rgba(255,255,255,0.45); font-size: 10px; letter-spacing: 1.5px;
+    text-align: center; margin-top: 18px;
+    color: var(--muted); font-size: 10px; letter-spacing: 1px;
   }
 
   hr.separator { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
@@ -1045,37 +1016,11 @@ function render() {
 function renderLogin() {
   return `
     <div class="login-screen">
-      <div class="brand-icon" aria-hidden="true">
-        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" fill="none">
-          <path d="M32 4 L56 12 V30 C56 44 46 54 32 60 C18 54 8 44 8 30 V12 Z"
-                fill="rgba(238,126,34,0.12)" stroke="#EE7E22" stroke-width="2" stroke-linejoin="round"/>
-          <rect x="20" y="22" width="24" height="20" rx="2"
-                fill="#EE7E22" stroke="#fff" stroke-width="1.5"/>
-          <line x1="20" y1="29" x2="44" y2="29" stroke="#fff" stroke-width="1.5"/>
-          <line x1="32" y1="22" x2="32" y2="29" stroke="#fff" stroke-width="1.5"/>
-          <g stroke="#fff" stroke-width="1.2">
-            <line x1="23" y1="33" x2="23" y2="39"/>
-            <line x1="26" y1="33" x2="26" y2="39"/>
-            <line x1="28" y1="33" x2="28" y2="39"/>
-            <line x1="31" y1="33" x2="31" y2="39"/>
-            <line x1="34" y1="33" x2="34" y2="39"/>
-            <line x1="37" y1="33" x2="37" y2="39"/>
-            <line x1="40" y1="33" x2="40" y2="39"/>
-          </g>
-          <circle cx="46" cy="46" r="7" fill="#1B2A5E" stroke="#fff" stroke-width="1.5"/>
-          <path d="M43 46 L45.5 48.5 L49 44.5" stroke="#EE7E22" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-        </svg>
-      </div>
-      <div class="logo">
-        <div class="brand-mark">BRANDÃO <span class="amp">&amp;</span> MARMO</div>
-        <div class="tagline">ENGENHARIA E CONSTRUÇÕES</div>
-      </div>
-      <div class="pill-wrap">
-        <div class="system-pill"><span class="dot"></span>CONTROLE DE PATRIMÔNIO</div>
-      </div>
       <div class="login-card">
-        <h2>Entrar</h2>
-        <div class="subtitle">Acesse com suas credenciais corporativas</div>
+        <div class="brand-icon"><img src="icon-192.png" alt="Patrimônio Brandão & Marmo"></div>
+        <div class="brand-mark"><span class="b1">BRANDÃO</span> <span class="b2">&amp; MARMO</span></div>
+        <div class="system-name">Sistema <strong>de Patrimônio</strong></div>
+        <div class="system-desc">Controle de bens e ativos</div>
         <form id="login-form">
           <div class="form-group">
             <label>E-mail</label>
@@ -1087,8 +1032,8 @@ function renderLogin() {
           </div>
           <button type="submit" class="btn">Entrar</button>
         </form>
+        <div class="footer-mark">© BRANDÃO &amp; MARMO • SISTEMA INTERNO</div>
       </div>
-      <div class="footer-mark">© BRANDÃO &amp; MARMO • SISTEMA INTERNO</div>
     </div>
   `;
 }
@@ -1624,6 +1569,12 @@ function openDetail(patrimonioId) {
         ` : ''}
 
         ${p.foto ? `<div style="margin:10px 0;text-align:center;"><img src="${p.foto}" alt="Foto do patrimônio" style="max-width:100%;max-height:300px;border-radius:10px;border:1px solid var(--border);cursor:pointer;" onclick="window.open(this.src,'_blank')"></div>` : ''}
+        ${isAdminCat ? `
+          <div style="text-align:center;margin:0 0 12px;">
+            <input type="file" id="d-foto" accept="image/*" style="display:none;">
+            <button class="btn secondary" data-action="add-foto" style="width:auto;padding:6px 14px;font-size:13px;">📷 ${p.foto ? 'Trocar foto' : 'Adicionar foto'}</button>
+          </div>
+        ` : ''}
         <div class="card" style="padding:12px;">
           <div class="detail-row"><span class="label">Categoria</span><span class="value">${cat ? cat.icone+' '+cat.nome : '—'}</span></div>
           <div class="detail-row"><span class="label">Nota fiscal</span><span class="value">${escapeHtml(p.notaFiscal || '—')}</span></div>
@@ -1721,13 +1672,32 @@ function openDetail(patrimonioId) {
 
   const $a = (sel) => node.querySelector(sel);
   if ($a('[data-action="accept"]')) $a('[data-action="accept"]').addEventListener('click', () => { acceptReceipt(p.id); node.remove(); openDetail(p.id); });
+  if ($a('[data-action="add-foto"]')) {
+    const inpFoto = $a('#d-foto');
+    $a('[data-action="add-foto"]').addEventListener('click', () => inpFoto.click());
+    inpFoto.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      toast('Processando foto...', 'success');
+      try {
+        const dataURL = await comprimirImagem(file);
+        p.foto = dataURL;
+        p.atualizadoEm = new Date().toISOString();
+        save();
+        toast('Foto salva', 'success');
+        node.remove(); openDetail(p.id);
+      } catch (err) {
+        toast('Falha ao processar a foto', 'error');
+      }
+    });
+  }
   if ($a('[data-action="move"]'))   $a('[data-action="move"]').addEventListener('click', () => { node.remove(); openMove(p.id); });
   if ($a('[data-action="manut"]'))  $a('[data-action="manut"]').addEventListener('click', () => { node.remove(); sendToMaintenance(p.id); });
   if ($a('[data-action="ret-manut"]')) $a('[data-action="ret-manut"]').addEventListener('click', () => { changeStatus(p.id, 'ativo', 'Retorno de manutenção', 'retorno_manutencao'); node.remove(); openDetail(p.id); });
   if ($a('[data-action="baixa"]'))  $a('[data-action="baixa"]').addEventListener('click', () => { requestBaixa(p.id, 'baixa'); node.remove(); });
   if ($a('[data-action="extraviado"]')) $a('[data-action="extraviado"]').addEventListener('click', () => { requestBaixa(p.id, 'extravio'); node.remove(); });
   if ($a('[data-action="approve-cad"]')) $a('[data-action="approve-cad"]').addEventListener('click', () => { approveCadastro(p.id); node.remove(); });
-  if ($a('[data-action="reject-cad"]'))  $a('[data-action="reject-cad"]').addEventListener('click', () => { if(confirm('Rejeitar este cadastro? O item será removido.')){ rejectCadastro(p.id); node.remove(); }});
+  if ($a('[data-action="reject-cad"]'))  $a('[data-action="reject-cad"]').addEventListener('click', () => { if(confirm('Rejeitar este cadastro? Ele sai do app, mas o registro fica guardado no Supabase.')){ rejectCadastro(p.id); node.remove(); }});
   if ($a('[data-action="approve-baixa"]')) $a('[data-action="approve-baixa"]').addEventListener('click', () => { approveBaixa(p.id); node.remove(); });
   if ($a('[data-action="reject-baixa"]'))  $a('[data-action="reject-baixa"]').addEventListener('click', () => { rejectBaixa(p.id); node.remove(); });
   if ($a('[data-action="approve-move"]')) $a('[data-action="approve-move"]').addEventListener('click', () => { approveMove(p.id); node.remove(); });
