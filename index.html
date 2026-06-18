@@ -765,6 +765,16 @@ const nextId = (col) => {
   return DB._nextId[col]++;
 };
 
+// Normaliza datas para AAAA-MM-DD (o Postgres recusa DD/MM/AAAA).
+const toISODate = (v) => {
+  if (!v) return null;
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  return s;
+};
+
 const $ = (sel, root=document) => root.querySelector(sel);
 const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1234,8 +1244,10 @@ function bindTopbar() {
   $('#btn-refresh').addEventListener('click', () => {
     const btn = $('#btn-refresh');
     btn.classList.add('spinning');
-    /* recarrega DB do servidor e re-renderiza */
-    BMStore.load().then(d => { DB = d; render(); toast('Atualizado', 'success'); });
+    const uid = DB.currentUser; // load() zera currentUser; preservamos pra não deslogar
+    BMStore.load()
+      .then(d => { DB = d; DB.currentUser = uid; render(); toast('Atualizado', 'success'); })
+      .finally(() => btn.classList.remove('spinning'));
   });
   $('#btn-logout').addEventListener('click', async () => {
     if (!confirm('Encerrar a sessão?')) return;
@@ -1694,7 +1706,7 @@ function openDetail(patrimonioId) {
   wrap.innerHTML = html;
   const node = wrap.firstElementChild;
   document.body.appendChild(node);
-  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  /* clique fora NÃO fecha o modal (evita fechar/retroceder sem querer) — use ✕/Voltar */
   node.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => node.remove()));
 
   const $a = (sel) => node.querySelector(sel);
@@ -1821,7 +1833,7 @@ function openMove(patrimonioId) {
   `;
   const wrap = document.createElement('div'); wrap.innerHTML = html;
   const node = wrap.firstElementChild; document.body.appendChild(node);
-  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  /* clique fora NÃO fecha o modal (evita fechar/retroceder sem querer) — use ✕/Voltar */
   node.querySelector('[data-close]').addEventListener('click', () => node.remove());
 
   node.querySelector('#move-form').addEventListener('submit', e => {
@@ -1963,7 +1975,7 @@ function sendToMaintenance(patrimonioId) {
     </div>`;
   const wrap = document.createElement('div'); wrap.innerHTML = html;
   const node = wrap.firstElementChild; document.body.appendChild(node);
-  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  /* clique fora NÃO fecha o modal (evita fechar/retroceder sem querer) — use ✕/Voltar */
   node.querySelector('[data-close]').addEventListener('click', () => node.remove());
   node.querySelector('#mnt-confirm').addEventListener('click', () => {
     const respId = node.querySelector('#mnt-resp').value || null;   // uuid (string)
@@ -2768,7 +2780,7 @@ function openInventoryStart() {
   `;
   const wrap = document.createElement('div'); wrap.innerHTML = html;
   const node = wrap.firstElementChild; document.body.appendChild(node);
-  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  /* clique fora NÃO fecha o modal (evita fechar/retroceder sem querer) — use ✕/Voltar */
   node.querySelector('[data-close]').addEventListener('click', () => node.remove());
   node.querySelector('#inv-go').addEventListener('click', () => {
     const locId = parseInt(node.querySelector('#inv-loc').value);
@@ -2828,7 +2840,7 @@ function openInventoryRunning() {
   `;
   const wrap = document.createElement('div'); wrap.innerHTML = html;
   const node = wrap.firstElementChild; document.body.appendChild(node);
-  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  /* clique fora NÃO fecha o modal (evita fechar/retroceder sem querer) — use ✕/Voltar */
   node.querySelector('[data-close]').addEventListener('click', () => node.remove());
 
   node.querySelector('#inv-scan').addEventListener('click', () => {
@@ -2984,7 +2996,7 @@ function openReport(kind) {
   `;
   const wrap = document.createElement('div'); wrap.innerHTML = html;
   const node = wrap.firstElementChild; document.body.appendChild(node);
-  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  /* clique fora NÃO fecha o modal (evita fechar/retroceder sem querer) — use ✕/Voltar */
   node.querySelector('[data-close]').addEventListener('click', () => node.remove());
 }
 
@@ -3054,7 +3066,7 @@ function openCadSubcat() {
     </div>`;
   const wrap = document.createElement('div'); wrap.innerHTML = html2;
   const node = wrap.firstElementChild; document.body.appendChild(node);
-  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  /* clique fora NÃO fecha o modal (evita fechar/retroceder sem querer) — use ✕/Voltar */
   node.querySelector('[data-close]').addEventListener('click', () => node.remove());
   node.querySelector('#subcat-form').addEventListener('submit', e => {
     e.preventDefault();
@@ -3120,7 +3132,7 @@ function openCadLoc() {
   `;
   const wrap = document.createElement('div'); wrap.innerHTML = html;
   const node = wrap.firstElementChild; document.body.appendChild(node);
-  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  /* clique fora NÃO fecha o modal (evita fechar/retroceder sem querer) — use ✕/Voltar */
   node.querySelector('[data-close]').addEventListener('click', () => node.remove());
   node.querySelector('#loc-form').addEventListener('submit', e => {
     e.preventDefault();
@@ -3226,7 +3238,7 @@ function openCadUser() {
   `;
   const wrap = document.createElement('div'); wrap.innerHTML = html;
   const node = wrap.firstElementChild; document.body.appendChild(node);
-  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  /* clique fora NÃO fecha o modal (evita fechar/retroceder sem querer) — use ✕/Voltar */
   node.querySelector('[data-close]').addEventListener('click', () => node.remove());
 
   // Editar usuário
@@ -3621,7 +3633,7 @@ function openImportCsv() {
     </div>`;
   const wrap = document.createElement('div'); wrap.innerHTML = html;
   const node = wrap.firstElementChild; document.body.appendChild(node);
-  node.addEventListener('click', e => { if (e.target === node) node.remove(); });
+  /* clique fora NÃO fecha o modal (evita fechar/retroceder sem querer) — use ✕/Voltar */
   node.querySelector('[data-close]').addEventListener('click', () => node.remove());
 
   // Baixar modelo
