@@ -1011,7 +1011,7 @@ const Lookup = {
 
 let State = {
   tab: 'home',
-  filter: { q: '', status: '', categoria: '', local: '', responsavel: '' }
+  filter: { q: '', status: '', categoria: '', subcategoria: '', local: '', responsavel: '' }
 };
 
 /* ============== RENDER ============== */
@@ -1458,6 +1458,7 @@ function renderList() {
   }
   if (f.status) items = items.filter(p => p.status === f.status);
   if (f.categoria) items = items.filter(p => String(p.categoriaId) === String(f.categoria));
+  if (f.subcategoria) items = items.filter(p => String(p.subcategoriaId) === String(f.subcategoria));
   if (f.local) items = items.filter(p => String(p.localizacaoAtualId) === String(f.local));
   if (f.responsavel) items = items.filter(p => String(p.responsavelAtualId) === String(f.responsavel));
 
@@ -1466,6 +1467,12 @@ function renderList() {
                      : u.perfil === 'admin_obras' ? DB.categorias.filter(c => c.id === 1)
                      : DB.categorias;
   const showCatFilter = catsVisiveis.length > 1;
+
+  // Subcategorias disponíveis (das categorias visíveis; se houver filtro de categoria, restringe a ela)
+  const catIdsVisiveis = catsVisiveis.map(c => c.id);
+  let subcatsDisponiveis = (DB.subcategorias || []).filter(s => catIdsVisiveis.includes(s.categoriaId));
+  if (f.categoria) subcatsDisponiveis = subcatsDisponiveis.filter(s => String(s.categoriaId) === String(f.categoria));
+  subcatsDisponiveis = subcatsDisponiveis.slice().sort((a, b) => a.nome.localeCompare(b.nome));
 
   // Locais e usuários para os filtros (apenas admins)
   const locaisDisponiveis = Lookup.visibleLocations(u);
@@ -1499,6 +1506,13 @@ function renderList() {
         <option value="extraviado"         ${f.status==='extraviado'?'selected':''}>Extraviado</option>
       </select>
     </div>
+    ${subcatsDisponiveis.length ? `
+    <div class="filter-row">
+      <select id="f-subcat">
+        <option value="">Todas subcategorias</option>
+        ${subcatsDisponiveis.map(s => `<option value="${s.id}" ${String(f.subcategoria)===String(s.id)?'selected':''}>${escapeHtml(s.nome)}</option>`).join('')}
+      </select>
+    </div>` : ''}
     ${isAdmin ? `
     <div class="filter-row">
       <select id="f-local">
@@ -1526,6 +1540,7 @@ function renderList() {
 
 function renderItemCard(p) {
   const cat = Lookup.cat(p.categoriaId);
+  const sub = (DB.subcategorias || []).find(s => s.id === p.subcategoriaId);
   const loc = Lookup.loc(p.localizacaoAtualId);
   const resp = Lookup.user(p.responsavelAtualId);
   const catClass = cat ? (cat.id === 2 ? 'cat-ti' : 'cat-obra') : '';
@@ -1534,7 +1549,7 @@ function renderItemCard(p) {
       <div class="item-icon">${cat ? cat.icone : '📦'}</div>
       <div class="item-info">
         <div class="title">${escapeHtml(p.descricao)}</div>
-        <div class="subtitle">${loc ? escapeHtml(loc.nome) : '—'} · ${resp ? escapeHtml(resp.nome) : 'Sem responsável'}</div>
+        <div class="subtitle">${sub ? escapeHtml(sub.nome) + ' · ' : ''}${loc ? escapeHtml(loc.nome) : '—'} · ${resp ? escapeHtml(resp.nome) : 'Sem responsável'}</div>
         <div style="margin-top:4px;">
           <span class="codigo">${escapeHtml(p.codigoBarras)}</span>
           <span class="badge ${p.status}" style="margin-left:6px;">${statusLabel(p.status)}</span>
@@ -1562,7 +1577,8 @@ function statusLabel(s) {
 
 function bindList() {
   const q = $('#f-q'); if (q) q.addEventListener('input', e => { State.filter.q = e.target.value; render(); $('#f-q').focus(); });
-  const fc = $('#f-cat'); if (fc) fc.addEventListener('change', e => { State.filter.categoria = e.target.value; render(); });
+  const fc = $('#f-cat'); if (fc) fc.addEventListener('change', e => { State.filter.categoria = e.target.value; State.filter.subcategoria = ''; render(); });
+  const fsc = $('#f-subcat'); if (fsc) fsc.addEventListener('change', e => { State.filter.subcategoria = e.target.value; render(); });
   const fs = $('#f-status'); if (fs) fs.addEventListener('change', e => { State.filter.status = e.target.value; render(); });
   const fl = $('#f-local'); if (fl) fl.addEventListener('change', e => { State.filter.local = e.target.value; render(); });
   const fr = $('#f-resp'); if (fr) fr.addEventListener('change', e => { State.filter.responsavel = e.target.value; render(); });
@@ -1577,6 +1593,7 @@ function openDetail(patrimonioId) {
   const u = Lookup.user(DB.currentUser);
   if (!Lookup.canSee(u, p)) return toast('Sem permissão para visualizar este item', 'error');
   const cat = Lookup.cat(p.categoriaId);
+  const sub = (DB.subcategorias || []).find(s => s.id === p.subcategoriaId);
   const loc = Lookup.loc(p.localizacaoAtualId);
   const resp = Lookup.user(p.responsavelAtualId);
   const movs = Lookup.movs(p.id);
@@ -1616,6 +1633,7 @@ function openDetail(patrimonioId) {
         ` : ''}
         <div class="card" style="padding:12px;">
           <div class="detail-row"><span class="label">Categoria</span><span class="value">${cat ? cat.icone+' '+cat.nome : '—'}</span></div>
+          <div class="detail-row"><span class="label">Subcategoria</span><span class="value">${sub ? escapeHtml(sub.nome) : '—'}</span></div>
           <div class="detail-row"><span class="label">Nota fiscal</span><span class="value">${escapeHtml(p.notaFiscal || '—')}</span></div>
           <div class="detail-row"><span class="label">Aquisição</span><span class="value">${fmtDate(p.dataAquisicao)}</span></div>
           <div class="detail-row"><span class="label">Valor</span><span class="value">${fmtMoney(p.valorAquisicao)}</span></div>
@@ -3045,6 +3063,7 @@ function openCadSubcat() {
             ${(DB.subcategorias||[]).filter(s=>s.categoriaId===cat.id).map(s=>`
               <div class="item" style="padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
                 <div class="item-info" style="flex:1"><div class="title">${escapeHtml(s.nome)}</div></div>
+                <button class="btn secondary sc-edit" data-sc-id="${s.id}" title="Editar nome" style="width:auto;padding:4px 10px;font-size:13px;">✏️</button>
                 <button class="btn secondary sc-del" data-sc-id="${s.id}" title="Excluir subcategoria" style="width:auto;padding:4px 10px;font-size:13px;color:var(--danger);border-color:var(--danger);">🗑️</button>
               </div>`).join('') || '<div style="color:var(--muted);font-size:13px;padding:4px 0">Nenhuma subcategoria</div>'}
           </div>
@@ -3076,6 +3095,25 @@ function openCadSubcat() {
     if (!DB.subcategorias) DB.subcategorias = [];
     DB.subcategorias.push({ id: nextId('subcategorias'), nome, categoriaId: catId });
     save(); node.remove(); toast('Subcategoria adicionada', 'success'); openCadSubcat();
+  });
+  // Editar nome da subcategoria — respeita permissão por categoria
+  node.querySelectorAll('.sc-edit').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const scId = parseInt(btn.dataset.scId);
+      const sub  = (DB.subcategorias||[]).find(s => s.id === scId);
+      if (!sub) return;
+      if (!Perms.canManageCategoria(u, sub.categoriaId)) {
+        const cat = Lookup.cat(sub.categoriaId);
+        return toast(`Sem permissão para editar subcategorias de "${cat ? cat.nome : 'esta categoria'}".`, 'error');
+      }
+      const novo = prompt('Novo nome da subcategoria:', sub.nome);
+      if (novo === null) return;
+      const nome = novo.trim();
+      if (!nome) return toast('O nome não pode ficar vazio', 'error');
+      if (nome === sub.nome) return;
+      sub.nome = nome;
+      save(); node.remove(); toast('Subcategoria renomeada', 'success'); openCadSubcat();
+    });
   });
   // Excluir subcategoria — respeita permissão por categoria
   node.querySelectorAll('.sc-del').forEach(btn => {
